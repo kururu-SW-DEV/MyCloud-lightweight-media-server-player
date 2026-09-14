@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#000000">
+    <title>MyCloud Media Player</title>
+    <link rel="stylesheet" href="style.css?v=20260911">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="navbar">
+            <div class="brand" onclick="switchMode('folder', '')" style="cursor: pointer;" title="홈으로 이동">
+                <span class="icon">🎬</span>
+                <h1>MyCloud <span>Media Player</span></h1>
+            </div>
+            <div class="search-bar">
+                <input type="text" id="search-input" placeholder="영상 또는 폴더 검색..." autocomplete="off">
+                <button id="clear-search" class="clear-btn" title="검색어 지우기">&times;</button>
+            </div>
+            <div class="nav-actions">
+                <button id="refresh-btn" class="btn btn-secondary" title="새로고침">🔄 새로고침</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Directory Path, Mode Toggle & Status -->
+            <div class="breadcrumb-container">
+                <div class="breadcrumbs" id="breadcrumbs">
+                    <span class="crumb active" data-path="">🏠 Public</span>
+                </div>
+                <div class="toolbar-right">
+                    <div class="view-mode-toggle">
+                        <button id="mode-folder-btn" class="btn-mode active" title="폴더별 탐색">📁 폴더별</button>
+                        <button id="mode-all-btn" class="btn-mode" title="모든 폴더의 영상을 한 번에 보기">🎬 전체 영상</button>
+                    </div>
+                    <div class="layout-toggle" title="목록 표시 형태">
+                        <button id="layout-grid-btn" class="btn-layout" title="타일 형식으로 보기">🔲 타일</button>
+                        <button id="layout-list-btn" class="btn-layout active" title="목록(리스트) 형식으로 보기">☰ 목록</button>
+                    </div>
+                    <div class="meta-toggle" title="파일 날짜 및 용량 표시 설정 (기본: 숨김)">
+                        <button id="meta-hide-btn" class="btn-layout active" title="파일 날짜 및 용량 숨김 (기본값)">
+                            <span class="toggle-text-full">🙈 날짜·용량 숨김</span>
+                            <span class="toggle-text-short">🙈 숨김</span>
+                        </button>
+                        <button id="meta-show-btn" class="btn-layout" title="파일 날짜 및 용량 표시">
+                            <span class="toggle-text-full">👁️ 날짜·용량 표시</span>
+                            <span class="toggle-text-short">👁️ 표시</span>
+                        </button>
+                    </div>
+                    <select id="sort-select" class="sort-select" title="정렬 기준">
+                        <option value="name_asc" selected>🔤 이름순 (1,2,3..)</option>
+                        <option value="name_desc">🔤 이름 역순</option>
+                        <option value="date_desc">📅 최신 등록순</option>
+                        <option value="date_asc">📅 오래된 등록순</option>
+                        <option value="size_desc">💾 파일 크기순</option>
+                    </select>
+                    <div class="stats" id="stats-badge">불러오는 중...</div>
+                </div>
+            </div>
+
+            <!-- Media Grid (Folders & Videos) -->
+            <div class="video-grid list-view" id="video-grid">
+                <div class="loading-spinner">항목을 불러오는 중입니다...</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Video Player Modal -->
+    <div id="player-modal" class="modal">
+        <div class="modal-dialog">
+            <div class="modal-header" title="마우스로 드래그하여 창 이동 (더블클릭: 중앙 정렬)">
+                <h2 id="player-title" class="video-title-display">
+                    <span class="drag-handle-icon" title="마우스로 드래그하여 창 이동">✥</span>
+                    <span id="player-title-text">제목</span>
+                </h2>
+                <div class="modal-header-actions">
+                    <button id="prev-video-btn" class="btn btn-small" title="이전 영상 재생 (단축키: Shift + P)">⏮️ 이전</button>
+                    <button id="next-video-btn" class="btn btn-small" title="다음 영상 재생 (단축키: Shift + N)">다음 ⏭️</button>
+                    <button id="minimize-btn" class="btn btn-small" title="최소화 (영상은 계속 재생됨, 단축키: M)">🔽 최소화</button>
+                    <button id="fullscreen-btn" class="btn btn-small" title="전체화면 (단축키: F 또는 더블클릭)">⛶ 전체화면</button>
+                    <button id="close-player-btn" class="btn-close" title="닫기 (Esc)">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="video-wrapper" id="video-wrapper">
+                    <video id="video-player" playsinline controls preload="metadata">
+                        <track id="webplayer-native-track" kind="subtitles" srclang="ko" label="WebPlayerSub">
+                    </video>
+                    <!-- Custom High-Fidelity Subtitle Overlay -->
+                    <div id="subtitle-box" class="subtitle-box" style="display:none;"></div>
+                </div>
+            </div>
+            <!-- Player Toolbar -->
+            <div class="modal-footer">
+                <div class="control-group">
+                    <label for="sub-select">자막 선택:</label>
+                    <select id="sub-select" class="select-input">
+                        <option value="">자막 없음</option>
+                    </select>
+                    <button id="custom-sub-btn" class="btn btn-small">📂 외부 자막 열기</button>
+                    <input type="file" id="custom-sub-input" accept=".smi,.sami,.srt,.ass,.ssa,.vtt" style="display:none">
+                </div>
+                <div class="control-group">
+                    <span>자막 스타일:</span>
+                    <button id="sub-bg-toggle" class="btn btn-small" title="자막 배경 박스 전환 (단축키: B)">🔳 배경: 있음</button>
+                    <button id="font-decrease" class="btn btn-small" title="자막 축소 (단축키: -)">A-</button>
+                    <button id="font-increase" class="btn btn-small" title="자막 확대 (단축키: +)">A+</button>
+                </div>
+                <div class="control-group">
+                    <span>싱크 조절:</span>
+                    <button class="btn btn-small sync-btn" data-offset="-0.5">-0.5s</button>
+                    <span id="sync-display" class="sync-value">0.0s</span>
+                    <button class="btn btn-small sync-btn" data-offset="0.5">+0.5s</button>
+                    <button id="sync-reset" class="btn btn-small">초기화</button>
+                </div>
+
+            </div>
+            <!-- Floating Player Resize Handle -->
+            <div id="modal-resize-handle" class="modal-resize-handle" title="창 크기 조절 (마우스 드래그 / 더블클릭: 기본 크기 복원)">⤡</div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <script src="app.js?v=20260911_v4"></script>
+</body>
+</html>
