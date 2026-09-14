@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 *.bak
 .env
+test_and_tools/
