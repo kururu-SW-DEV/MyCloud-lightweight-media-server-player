@@ -7,7 +7,6 @@ WD My Cloud Gen 1 (ARMv7 650MHz, 226MB RAM, 5400RPM HDD) 전용으로 설계된 
 ## 📁 디렉터리 및 파일 구조
 
 ```
-C:\Users\user\Desktop\AI 작업\3. 경량 서버용 미디어 플레이어/
 ├── webplayer/                  # [웹서버 배포 소스 전용 폴더 - 실제 배포는 이 폴더 기준]
 │   ├── index.html              # 웹플레이어 메인 HTML UI
 │   ├── style.css               # 모던 다크 티타늄 UI, 반응형 그리드 & GPU 가속 스타일
