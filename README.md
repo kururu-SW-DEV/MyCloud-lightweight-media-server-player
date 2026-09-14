@@ -55,13 +55,19 @@ set NAS_HOST=192.168.0.7
 set NAS_PORT=22
 set NAS_USERNAME=root
 set NAS_PASSWORD=여기에_실제_비밀번호
+set NAS_OWNER=root
+set NAS_GROUP=share
 
 # macOS/Linux
 export NAS_HOST=192.168.0.7
 export NAS_PORT=22
 export NAS_USERNAME=root
 export NAS_PASSWORD=여기에_실제_비밀번호
+export NAS_OWNER=root
+export NAS_GROUP=share
 ```
+
+`NAS_OWNER`/`NAS_GROUP`은 배포 후 `webplayer/` 폴더의 소유자·그룹을 지정합니다(윈도우 탐색기에서 직접 수정 가능하도록 권한을 여는 용도). 각각 기본값(`root`, `share`)이 있어 생략 가능합니다.
 
 `NAS_HOST`/`NAS_PORT`/`NAS_USERNAME`은 각각 기본값(`192.168.0.7`, `22`, `root`)이 있어 생략 가능하지만, `NAS_PASSWORD`는 반드시 설정해야 합니다.
 

@@ -3943,7 +3943,9 @@ def main():
             f.write(get_file_content('app.js', APP_JS))
             
         print("[10] Setting permissions for Windows Explorer editability...")
-        _, stdout, _ = client.exec_command('chmod -R 777 /shares/Public/webplayer; chown -R webplayer:share /shares/Public/webplayer')
+        nas_owner = os.environ.get('NAS_OWNER', 'root')
+        nas_group = os.environ.get('NAS_GROUP', 'share')
+        _, stdout, _ = client.exec_command(f'chmod -R 777 /shares/Public/webplayer; chown -R {nas_owner}:{nas_group} /shares/Public/webplayer')
         stdout.read()
         
         print("[11] Restarting Apache...")
