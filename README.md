@@ -24,8 +24,7 @@ C:\Users\user\Desktop\AI 작업\3. 경량 서버용 미디어 플레이어/
 ├── DEVELOPMENT_LOG.md          # 초상세 전과정 개발일지 (아키텍처, 최적화 내역)
 ├── implementation_plan.md      # 핵심 최적화 및 아키텍처 설계 계획서
 ├── walkthrough.md              # 최적화 및 자막 수정 완료 보고서
-├── test_and_tools/             # 실서버 검증, 벤치마크 및 진단 스크립트 모음 (125개 도구)
-└── _삭제후보(검토후_삭제)/      # 정리 과정에서 나온 구버전/중복 파일 보관 - 검토 후 직접 삭제
+└── test_and_tools/             # 실서버 검증, 벤치마크 및 진단 스크립트 모음 (125개 도구)
 ```
 
 > ⚠️ **NAS의 SSH가 매우 오래됐습니다** (OpenSSH 6.0p1, 2012년/Debian 7). `paramiko`가 5.x부터 이 서버가 쓰는 `ssh-rsa`/`ssh-dss` host key 방식을 아예 지원하지 않으므로, `requirements.txt`에 `paramiko==3.5.1`로 고정돼 있습니다. 이 프로젝트 밖에서 `pip install paramiko`로 최신 버전을 깔면 `ssh_client.py`/`deploy_webplayer.py`가 즉시 깨지니 주의하세요.
