@@ -31,14 +31,69 @@ C:\Users\user\Desktop\AI 작업\3. 경량 서버용 미디어 플레이어/
 
 ---
 
-## 🚀 원클릭 배포 방법
+## 🔧 설치 방법
 
+### 1. 사전 요구사항
+- **로컬 PC**: Python 3.8+
+- **NAS**: Apache2 + PHP, SSH 접속 가능 (이 프로젝트는 WD My Cloud Gen 1 / Debian 7 기준으로 작성됨)
+
+### 2. 로컬 환경 설정
+```bash
+git clone https://github.com/kururu-SW-DEV/lightweight-media-server-player.git
+cd lightweight-media-server-player
+
+python -m venv venv
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # macOS/Linux
+
+pip install -r requirements.txt
+```
+
+> ⚠️ 위 `paramiko==3.5.1` 버전 고정은 필수입니다. 최신 버전을 깔면 이 NAS의 구형 SSH(OpenSSH 6.0p1)에 아예 접속이 안 됩니다.
+
+### 3. NAS 접속 정보 설정 (환경변수)
+`ssh_client.py`는 NAS 접속 정보를 하드코딩하지 않고 환경변수로 받습니다. 배포 전에 아래 값을 설정하세요.
+
+```bash
+# Windows (cmd)
+set NAS_HOST=192.168.0.7
+set NAS_PORT=22
+set NAS_USERNAME=root
+set NAS_PASSWORD=여기에_실제_비밀번호
+
+# macOS/Linux
+export NAS_HOST=192.168.0.7
+export NAS_PORT=22
+export NAS_USERNAME=root
+export NAS_PASSWORD=여기에_실제_비밀번호
+```
+
+`NAS_HOST`/`NAS_PORT`/`NAS_USERNAME`은 각각 기본값(`192.168.0.7`, `22`, `root`)이 있어 생략 가능하지만, `NAS_PASSWORD`는 반드시 설정해야 합니다.
+
+### 4. NAS 측 최초 1회 수동 설정
+`deploy_webplayer.py`는 `webplayer/`, `apache/` 아래 파일들을 NAS의 `/shares/Public/webplayer`로 복사하고 Apache를 재시작해줄 뿐, 아래 설정은 대신해주지 않습니다. NAS에 SSH로 접속해 최초 1번만 해주세요.
+
+1. **Apache에 설정 포함**: `apache/apache_webplayer.conf`의 내용을 NAS의 Apache 메인 설정(예: `/etc/apache2/apache2.conf`)에 포함시킵니다.
+   ```
+   Include /shares/Public/webplayer/apache_webplayer.conf
+   ```
+2. **외부 접속용 계정 생성** (선택, 포트포워딩으로 외부 노출 시 필요 — `apache_webplayer.conf`가 LAN 밖 IP에는 Basic 인증을 요구하도록 이미 구성돼 있음):
+   ```bash
+   htpasswd -c /etc/apache2/.htpasswd-webplayer <아이디>
+   ```
+3. Apache를 재시작합니다: `service apache2 restart`
+
+> ℹ️ 정확한 include 경로/문법은 NAS의 Apache 배포판·버전에 따라 다를 수 있습니다. 이 NAS(Debian 7 기반)에서는 위 방식으로 동작을 확인했습니다.
+
+### 5. 배포
 로컬에서 코드를 수정한 후 아래 명령어를 실행하면 NAS로 즉시 배포 및 아파치가 재시작됩니다:
 
 ```bash
-# 가상환경 활성화 후
 python deploy_webplayer.py
 ```
+
+### 6. 접속 확인
+브라우저에서 `http://<NAS_IP>/player` 로 접속해 플레이어 화면이 뜨는지 확인합니다.
 
 ---
 
