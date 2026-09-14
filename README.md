@@ -19,9 +19,6 @@ WD My Cloud Gen 1 (ARMv7 650MHz, 226MB RAM, 5400RPM HDD) 전용으로 설계된 
 ├── deploy_webplayer.py         # NAS 원클릭 스마트 배포 스크립트 (webplayer/, apache/ 우선 반영)
 ├── ssh_client.py               # NAS SSH 자동 접속 클라이언트
 ├── requirements.txt            # 파이썬 의존성 패키지 (paramiko==3.5.1 고정 - 아래 참고)
-├── DEVELOPMENT_LOG.md          # 초상세 전과정 개발일지 (아키텍처, 최적화 내역)
-├── implementation_plan.md      # 핵심 최적화 및 아키텍처 설계 계획서
-├── walkthrough.md              # 최적화 및 자막 수정 완료 보고서
 └── test_and_tools/             # 실서버 검증, 벤치마크 및 진단 스크립트 모음 (125개 도구)
 ```
 
@@ -106,7 +103,7 @@ python deploy_webplayer.py
 > 🔒 **외부(포트포워딩 9991) 접속 시 로그인 필요**: `apache/apache_webplayer.conf`에 `192.168.0.0/24`(LAN)는 인증 없이 통과, 그 외 IP는 Basic 인증(`/etc/apache2/.htpasswd-webplayer`)을 요구하도록 설정. `/player`와 `/media` 둘 다 걸려있음(파일 직링크로 인증 우회 방지). 계정 관리는 NAS에서 직접: `htpasswd /etc/apache2/.htpasswd-webplayer <아이디>`.
 > 같은 파일에서 **NAS 자체 관리자 화면**(`/var/www/htdocs`, 포트 9991을 그대로 포워딩하면 `/` 경로로 노출됨)도 LAN 밖에서는 아예 403으로 막아둠 — 이건 플레이어용 약한 비밀번호로 지키기엔 위험도가 달라서 로그인 프롬프트 없이 완전 차단.
 
-> ℹ️ **다른 탭에서도 보이는 PiP는 시도 후 제거했습니다.** 브라우저 표준 PiP는 Chrome이 PiP 창 자체에 자막을 그리지 않는 [미해결 이슈](https://issues.chromium.org/issues/40581723) 때문에 자막이 전혀 안 보이고, 커스텀 오버레이까지 띄울 수 있는 Document PiP API는 HTTPS(보안 컨텍스트) 필수라 이 NAS(HTTP)에서는 애초에 동작하지 않습니다. 자세한 내용은 `DEVELOPMENT_LOG.md`의 "Phase 8" 참고.
+> ℹ️ **다른 탭에서도 보이는 PiP는 시도 후 제거했습니다.** 브라우저 표준 PiP는 Chrome이 PiP 창 자체에 자막을 그리지 않는 [미해결 이슈](https://issues.chromium.org/issues/40581723) 때문에 자막이 전혀 안 보이고, 커스텀 오버레이까지 띄울 수 있는 Document PiP API는 HTTPS(보안 컨텍스트) 필수라 이 NAS(HTTP)에서는 애초에 동작하지 않습니다.
 
 ---
 
