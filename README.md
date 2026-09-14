@@ -20,7 +20,6 @@ C:\Users\user\Desktop\AI 작업\3. 경량 서버용 미디어 플레이어/
 ├── deploy_webplayer.py         # NAS 원클릭 스마트 배포 스크립트 (webplayer/, apache/ 우선 반영)
 ├── ssh_client.py               # NAS SSH 자동 접속 클라이언트
 ├── requirements.txt            # 파이썬 의존성 패키지 (paramiko==3.5.1 고정 - 아래 참고)
-├── update_transmission_config.py # 트랜스미션 설정 도구
 ├── DEVELOPMENT_LOG.md          # 초상세 전과정 개발일지 (아키텍처, 최적화 내역)
 ├── implementation_plan.md      # 핵심 최적화 및 아키텍처 설계 계획서
 ├── walkthrough.md              # 최적화 및 자막 수정 완료 보고서
