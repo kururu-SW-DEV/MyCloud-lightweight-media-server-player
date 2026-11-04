@@ -11,6 +11,33 @@ function safeShellArg($arg) {
 // a sibling directory through, e.g. resolved "/shares/Public-evil/x" would
 // pass a check against base "/shares/Public" since the string itself matches
 // as a prefix even though the directory is not a descendant.
+
+// Security: Prevent path traversal and double URL encoding (%252e%252e, %00, null bytes)
+function validateRelativePath($path) {
+    if (!is_string($path)) return false;
+    $decoded = rawurldecode($path);
+    if (strpos($path, '..') !== false || strpos($path, "\0") !== false) return false;
+    if (strpos($decoded, '..') !== false || strpos($decoded, "\0") !== false) return false;
+    return true;
+}
+
+// 32-bit PHP integer overflow protection for large video files (> 2GB)
+function getSafeFileSize($fullPath) {
+    $size = @filesize($fullPath);
+    if ($size !== false && $size > 0 && $size <= 1073741824) {
+        return (string)$size;
+    }
+    $cmd = 'timeout 3 stat -c "%s" -- ' . safeShellArg($fullPath) . ' 2>/dev/null';
+    $out = trim(@shell_exec($cmd));
+    if ($out !== '' && ctype_digit($out)) {
+        return $out;
+    }
+    if ($size !== false && $size > 0) {
+        return sprintf("%.0f", (float)$size);
+    }
+    return '0';
+}
+
 function isWithinBaseDir($resolved, $base) {
     return $resolved === $base || strpos($resolved, $base . '/') === 0;
 }
@@ -34,6 +61,7 @@ function makeWebUrl($relPath) {
 
 // Helper: Format bytes - pure integer branch without log() / pow() (Item 9)
 function formatBytes($bytes, $precision = 2) {
+    $bytes = (float)$bytes;
     if ($bytes <= 0) return '0 B';
     if ($bytes < 1024) return $bytes . ' B';
     if ($bytes < 1048576) return round($bytes / 1024, $precision) . ' KB';
@@ -48,12 +76,12 @@ function formatBytes($bytes, $precision = 2) {
 if (isset($_GET['action']) && $_GET['action'] === 'probe_subs') {
     header('Content-Type: application/json; charset=utf-8');
     $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
-    if (empty($videoRel)) {
-        echo json_encode(array('success' => false, 'error' => 'No video specified'));
+    if (empty($videoRel) || !validateRelativePath($videoRel)) {
+        echo json_encode(array('success' => false, 'error' => 'Invalid video path'));
         exit;
     }
     $fullVideoPath = realpath($baseDir . '/' . $videoRel);
-    if ($fullVideoPath === false || !isWithinBaseDir($fullVideoPath, $baseDir) || !file_exists($fullVideoPath)) {
+    if ($fullVideoPath === false || !isWithinBaseDir($fullVideoPath, $baseDir) || !file_exists($fullVideoPath) || is_link($fullVideoPath)) {
         echo json_encode(array('success' => false, 'error' => 'File not found'));
         exit;
     }
@@ -141,20 +169,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
     $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
     $streamId = isset($_GET['stream']) ? intval($_GET['stream']) : 0;
     $codec = isset($_GET['codec']) ? strtolower(trim($_GET['codec'])) : 'srt';
-    // Whitelist only - $codec is concatenated straight into a cache file path
-    // below, so anything else (e.g. "../../../shares/Public/evil") would let
-    // a request write a file outside $tmpDir.
     if (!in_array($codec, array('srt', 'vtt', 'ass', 'ssa'), true)) {
         $codec = 'srt';
     }
 
-    if (empty($videoRel)) {
+    if (empty($videoRel) || !validateRelativePath($videoRel)) {
         header('HTTP/1.1 400 Bad Request');
-        echo "No video specified";
+        echo "Invalid video path";
         exit;
     }
     $fullVideoPath = realpath($baseDir . '/' . $videoRel);
-    if ($fullVideoPath === false || !isWithinBaseDir($fullVideoPath, $baseDir) || !file_exists($fullVideoPath)) {
+    if ($fullVideoPath === false || !isWithinBaseDir($fullVideoPath, $baseDir) || !file_exists($fullVideoPath) || is_link($fullVideoPath)) {
         header('HTTP/1.1 404 Not Found');
         echo "File not found";
         exit;
@@ -178,6 +203,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
     
     // Volatile RAM cache in /tmp (tmpfs in RAM: 0 disk space on HDD, instant 2ms delivery)
     $tmpDir = '/tmp/webplayer_sub_ram';
+    if (is_link($tmpDir)) {
+        @unlink($tmpDir);
+    }
     if (!is_dir($tmpDir)) {
         @mkdir($tmpDir, 0777, true);
     }
@@ -201,6 +229,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
     if (is_resource($proc)) {
         fclose($pipes[0]);
         stream_set_blocking($pipes[1], 1);
+        stream_set_timeout($pipes[1], 15);
         
         while (!feof($pipes[1])) {
             if (connection_aborted()) {
@@ -208,6 +237,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
                 break;
             }
             $buffer = fread($pipes[1], 8192);
+            $meta = stream_get_meta_data($pipes[1]);
+            if ($meta['timed_out']) {
+                @proc_terminate($proc, 9);
+                break;
+            }
             if ($buffer !== false && strlen($buffer) > 0) {
                 echo $buffer;
                 flush();
@@ -272,6 +306,7 @@ if ($mode === 'all') {
             if (in_array($item, $ignoreList) || $item[0] === '.') continue;
             $fullPath = $dir . '/' . $item;
             
+            if (is_link($fullPath)) continue;
             if (is_dir($fullPath)) {
                 $scanRecursive($fullPath, $depth + 1);
             } else if (is_file($fullPath)) {
@@ -281,7 +316,8 @@ if ($mode === 'all') {
                 $baseName = pathinfo($item, PATHINFO_FILENAME);
                 
                 if (in_array($ext, $videoExts)) {
-                    $size = @filesize($fullPath);
+                    $sizeStr = getSafeFileSize($fullPath);
+                    $size = (float)$sizeStr;
                     if ($size <= 0) continue;
                     $mtime = @filemtime($fullPath);
                     $allVideos[] = array(
@@ -361,8 +397,12 @@ $requestDir = isset($_GET['dir']) ? trim($_GET['dir'], " /\\") : '';
 $targetDir = $baseDir;
 
 if ($requestDir !== '') {
+    if (!validateRelativePath($requestDir)) {
+        echo json_encode(array('success' => false, 'error' => 'Path traversal prohibited'));
+        exit;
+    }
     $resolved = realpath($baseDir . '/' . $requestDir);
-    if ($resolved !== false && isWithinBaseDir($resolved, $baseDir) && is_dir($resolved)) {
+    if ($resolved !== false && isWithinBaseDir($resolved, $baseDir) && is_dir($resolved) && !is_link($resolved)) {
         $targetDir = $resolved;
     } else {
         echo json_encode(array('success' => false, 'error' => 'Invalid directory path'));
@@ -390,6 +430,7 @@ $rawDirs = array();
 foreach ($items as $item) {
     if (in_array($item, $ignoreList) || $item[0] === '.') continue;
     $fullPath = $targetDir . '/' . $item;
+    if (is_link($fullPath)) continue;
     
     if (is_dir($fullPath)) {
         $rawDirs[] = $item;
@@ -455,7 +496,9 @@ foreach ($allFiles as $item) {
     
     $baseName = pathinfo($item, PATHINFO_FILENAME);
     $fullPath = $targetDir . '/' . $item;
-    $size = @filesize($fullPath);
+    if (is_link($fullPath)) continue;
+    $sizeStr = getSafeFileSize($fullPath);
+    $size = (float)$sizeStr;
     if ($size <= 0) continue;
     $mtime = @filemtime($fullPath);
     

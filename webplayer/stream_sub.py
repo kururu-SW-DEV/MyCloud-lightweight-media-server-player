@@ -224,139 +224,13 @@ def probe_subtitles(video_path):
             cur_stream += 1
         p = entry_end
         
-    # Sort: Korean CONTENT first (detect actual hangul text), then kor-tagged, then others
-    # This handles Netflix/Rarbg multi-lang MKVs where language tags are wrong (e.g. kor tag = Japanese text)
-    import re as _re
-
-    # Pre-load Cues section ONCE (used by has_hangul_content for all kor tracks)
-    _seg_start = seg_data_start
-    _cues_data = None
-    if cues_offset is not None:
-        try:
-            fc = open(video_path, 'rb')
-            fc.seek(_seg_start + cues_offset)
-            ch = fc.read(12)
-            cid2, cl2 = read_id(ch, 0)
-            csz2, csl2 = read_vint(ch, cl2)
-            fc.seek(_seg_start + cues_offset + cl2 + csl2)
-            _cues_data = fc.read(csz2)
-            fc.close()
-        except Exception:
-            _cues_data = None
-
-    def has_hangul_content(sub_entry, seg_start=_seg_start, cues_data=_cues_data):
-        """Sample the first dialogue line's actual text (properly parsed out of its
-        Block/BlockGroup, not raw bytes) and check for Hangul (U+AC00-U+D7A3).
-        Pure in-process seek+read (no subprocess spawn) - a full Python interpreter
-        cold-start per candidate track was the real cost on this 650MHz CPU, since a
-        multi-language MKV can have several kor-tagged tracks to disambiguate."""
-        if cues_data is None:
-            return False
-        try:
-            tnum2 = sub_entry.get('track_number')
-            if tnum2 is None:
-                return False
-            if tnum2 < 128:
-                tsig = b'\xf7\x81' + chr(tnum2)
-            else:
-                tsig = b'\xf7\x82' + chr(tnum2 >> 8) + chr(tnum2 & 0xFF)
-            idx2 = cues_data.find(tsig)
-            if idx2 == -1:
-                return False
-            b7 = cues_data.rfind(b'\xb7', max(0, idx2 - 15), idx2)
-            if b7 == -1:
-                return False
-            _, el2 = read_id(cues_data, b7)
-            esz2, esl2 = read_vint(cues_data, b7 + el2)
-            if esz2 is None:
-                return False
-            tp2 = b7 + el2 + esl2
-            tp2_end = tp2 + esz2
-            cpos2 = None
-            rpos2 = 0
-            while tp2 < tp2_end:
-                tid2, il2 = read_id(cues_data, tp2)
-                if tid2 is None: break
-                tsz2, tsl2 = read_vint(cues_data, tp2 + il2)
-                if tsz2 is None: break
-                vp2 = tp2 + il2 + tsl2
-                if tid2 == 0xF1:  # CueClusterPosition
-                    v2 = 0
-                    for i in range(tsz2): v2 = (v2 << 8) | ord(cues_data[vp2 + i])
-                    cpos2 = v2
-                elif tid2 == 0xF0:  # CueRelativePosition
-                    v2 = 0
-                    for i in range(tsz2): v2 = (v2 << 8) | ord(cues_data[vp2 + i])
-                    rpos2 = v2
-                tp2 = vp2 + tsz2
-            if cpos2 is None:
-                return False
-
-            fh = open(video_path, 'rb')
-            try:
-                # Cluster header (ID + size vint) sits before its data - skip past it,
-                # same as the main streaming loop, instead of reading straight from
-                # seg_start+cpos+rpos (that offset lands inside the header, not the
-                # Block, which was the original bug: garbled bytes -> Hangul missed).
-                abs_cluster = seg_start + cpos2
-                fh.seek(abs_cluster + 4)
-                b0 = ord(fh.read(1))
-                vlen = 1
-                for l in range(1, 9):
-                    if b0 & (0x80 >> (l - 1)):
-                        vlen = l
-                        break
-                cluster_data_start = abs_cluster + 4 + vlen
-                fh.seek(cluster_data_start + rpos2)
-                block_hdr = fh.read(1024)
-            finally:
-                fh.close()
-
-            txt = None
-            eid, el = read_id(block_hdr, 0)
-            if eid == 0xA0:  # BlockGroup
-                esz, esl = read_vint(block_hdr, el)
-                if esz is not None:
-                    bg_data = block_hdr[el + esl: el + esl + esz]
-                    bp = 0
-                    while bp < len(bg_data):
-                        bid, bl = read_id(bg_data, bp)
-                        if bid is None: break
-                        bsz, bsl = read_vint(bg_data, bp + bl)
-                        if bsz is None: break
-                        if bid == 0xA1:  # Block
-                            block_payload = bg_data[bp + bl + bsl: bp + bl + bsl + bsz]
-                            tn, tlen = read_vint(block_payload, 0)
-                            if tn == tnum2:
-                                txt = block_payload[tlen + 3:]
-                            break
-                        bp += bl + bsl + bsz
-            elif eid == 0xA1 or eid == 0xA3:  # Block or SimpleBlock
-                esz, esl = read_vint(block_hdr, el)
-                if esz is not None:
-                    block_payload = block_hdr[el + esl: el + esl + esz]
-                    tn, tlen = read_vint(block_payload, 0)
-                    if tn == tnum2:
-                        txt = block_payload[tlen + 3:]
-
-            if not txt:
-                return False
-            sample = txt[:500].decode('utf-8', errors='replace')
-            return bool(_re.search(u'[\uAC00-\uD7A3]', sample))
-        except Exception:
-            return False
-
+    # Sort: Korean first, then English, then others; non-forced first
     def sub_sort_key(s):
-        lang = s['lang'].lower() if isinstance(s['lang'], str) else s['lang'].lower()
+        lang = s['lang'].lower()
+        is_kor = 0 if (lang in ('kor', 'ko', 'korean')) else 1
         is_forced = 1 if s['is_forced'] else 0
-        # Priority 0: kor-tagged AND actually has hangul text (real Korean content)
-        # Priority 1: kor-tagged but no hangul detected (wrong tag, e.g. Japanese text)
-        # Priority 2: all other languages
-        if lang in ('kor', 'ko', 'korean'):
-            real_kor = 0 if has_hangul_content(s) else 1
-            return (real_kor, is_forced, s['stream_id'])
-        return (2, is_forced, s['stream_id'])
-
+        return (is_kor, is_forced, s['stream_id'])
+        
     subs.sort(key=sub_sort_key)
     print json.dumps({'success': True, 'subtitles': subs})
 
@@ -458,13 +332,7 @@ def stream_subtitles_cues(video_path, stream_id):
                     tpriv = tracks_data[vpos : vpos + isz]
                 ep = vpos + isz
             is_sub = (ttype == 17) or (tcodec and 'S_' in tcodec)
-            # Match by position only - the frontend always sends the probe's
-            # 'stream_id' (a running index over subtitle tracks), never the raw
-            # Matroska TrackNumber. Also matching on tnum == target_stream_idx
-            # caused the wrong track to be picked whenever some track's actual
-            # TrackNumber happened to equal the requested stream_id (easy to hit
-            # on files with dozens of tracks, e.g. multi-language releases).
-            if is_sub and cur_stream == target_stream_idx:
+            if is_sub and (cur_stream == target_stream_idx or tnum == target_stream_idx):
                 target_track_num = tnum
                 target_codec = tcodec
                 codec_private = tpriv
@@ -542,17 +410,12 @@ def stream_subtitles_cues(video_path, stream_id):
             tp = vpos + tag_sz
                 
         if cpos is not None:
-            # Backward byte-scan for the CueTime (0xB3) tag - occasionally this
-            # matches a stray 0xB3 byte that isn't really the tag (coincidental
-            # data, not a real EBML boundary). The bounds check below makes that
-            # a no-op (ctime stays 0) instead of reading past cues_data and
-            # crashing the whole process with an unhandled IndexError.
             t_idx = cues_data.rfind(b'\xb3', max(0, b7_idx - 30), b7_idx)
             ctime = 0
             if t_idx != -1:
                 _, tl = read_id(cues_data, t_idx)
                 tsz, tsl = read_vint(cues_data, t_idx + tl)
-                if tsz is not None and t_idx + tl + tsl + tsz <= len(cues_data):
+                if tsz is not None:
                     v = 0
                     for i in range(tsz): v = (v << 8) | ord(cues_data[t_idx + tl + tsl + i])
                     ctime = v
@@ -562,14 +425,7 @@ def stream_subtitles_cues(video_path, stream_id):
         f.close()
         fallback_avconv_stream(video_path, stream_id)
         return
-
-    # Guarantee chronological + physically-ascending disk order. In practice the
-    # Cues table is already written this way (verified: 0 backward jumps across
-    # real sample files), so this is a cheap safety net rather than the fix for
-    # a measured problem - but it also means the HDD head never has to seek
-    # backward if some file ever isn't perfectly ordered.
-    cues.sort(key=lambda c: c[0])
-
+        
     is_ass = bool(target_codec and ('ASS' in target_codec or 'SSA' in target_codec))
     if is_ass and codec_private:
         try:
@@ -602,14 +458,11 @@ def stream_subtitles_cues(video_path, stream_id):
             f.seek(cluster_data_start + rpos)
         else:
             f.seek(cluster_data_start)
-
-        # A dialogue block (header + text) is essentially always well under 1KB;
-        # 2048 keeps a wide safety margin for long ASS override-tag lines while
-        # still halving the bytes pulled off the platter vs the old 4096 read.
-        block_hdr = f.read(2048)
+            
+        block_hdr = f.read(4096)
         txt = None
         b_dur = dur
-
+        
         eid, el = read_id(block_hdr, 0)
         if eid == 0xA0: # BlockGroup
             esz, esl = read_vint(block_hdr, el)

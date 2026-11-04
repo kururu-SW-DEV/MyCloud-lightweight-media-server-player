@@ -1038,6 +1038,7 @@ window.openPlayer = async function(encodedRelPath) {
         requestAnimationFrame(() => centerModalDialog());
     }
     
+    setupMediaSession(video);
     videoPlayer.play().catch(() => {});
     
     // 2. Probe embedded subtitle tracks with AbortController and race condition guard
@@ -1601,6 +1602,18 @@ function closePlayer() {
     if (isMinimized) restoreFromMinimize();
     videoPlayer.pause();
     videoPlayer.src = '';
+    currentSpeedIndex = 1;
+    if (videoPlayer) videoPlayer.playbackRate = 1.0;
+    if (videoSpeedText) videoSpeedText.textContent = '1.0x';
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
+    if (currentProbeAbortController) {
+        currentProbeAbortController.abort();
+        currentProbeAbortController = null;
+    }
+    if (currentSubAbortController) {
+        currentSubAbortController.abort();
+        currentSubAbortController = null;
+    }
     clearSubtitles();
     playerModal.classList.remove('active');
     hasCustomPosition = false;
@@ -1625,6 +1638,60 @@ document.addEventListener('keydown', (e) => {
         closePlayer();
     }
     if (playerModal.classList.contains('active')) {
+        // Space: Toggle Play/Pause
+        if (e.code === 'Space' || e.key === ' ') {
+            e.preventDefault();
+            if (videoPlayer.paused) {
+                videoPlayer.play();
+            } else {
+                videoPlayer.pause();
+            }
+            return;
+        }
+        // ArrowLeft: Seek -5s (Shift+ArrowLeft: -30s)
+        if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            const step = e.shiftKey ? 30 : 5;
+            videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - step);
+            showToast(`탐색: -${step}초`);
+            return;
+        }
+        // ArrowRight: Seek +5s (Shift+ArrowRight: +30s)
+        if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            const step = e.shiftKey ? 30 : 5;
+            videoPlayer.currentTime = Math.min(videoPlayer.duration || 0, videoPlayer.currentTime + step);
+            showToast(`탐색: +${step}초`);
+            return;
+        }
+        // ArrowUp: Volume +10%
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            videoPlayer.volume = Math.min(1, Math.round((videoPlayer.volume + 0.1) * 10) / 10);
+            showToast(`볼륨: ${Math.round(videoPlayer.volume * 100)}%`);
+            return;
+        }
+        // ArrowDown: Volume -10%
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            videoPlayer.volume = Math.max(0, Math.round((videoPlayer.volume - 0.1) * 10) / 10);
+            showToast(`볼륨: ${Math.round(videoPlayer.volume * 100)}%`);
+            return;
+        }
+        // > or Shift+. : Increase speed
+        if (e.key === '>' || (e.shiftKey && e.key === '.')) {
+            e.preventDefault();
+            currentSpeedIndex = Math.min(SPEED_STEPS.length - 1, currentSpeedIndex + 1);
+            setVideoSpeed(SPEED_STEPS[currentSpeedIndex]);
+            return;
+        }
+        // < or Shift+, : Decrease speed
+        if (e.key === '<' || (e.shiftKey && e.key === ',')) {
+            e.preventDefault();
+            currentSpeedIndex = Math.max(0, currentSpeedIndex - 1);
+            setVideoSpeed(SPEED_STEPS[currentSpeedIndex]);
+            return;
+        }
         if (e.key === 'f' || e.key === 'F') {
             toggleFullscreen();
         } else if (e.key === 'm' || e.key === 'M') {
@@ -1759,3 +1826,67 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadData('', 'folder');
     }
 });
+
+
+// -------------------------------------------------------------
+// Playback Speed Controller
+// -------------------------------------------------------------
+const btnVideoSpeed = document.getElementById('btn-video-speed');
+const videoSpeedText = document.getElementById('video-speed-text');
+const SPEED_STEPS = [0.75, 1.0, 1.25, 1.5, 2.0];
+let currentSpeedIndex = 1; // Default 1.0x
+
+function setVideoSpeed(speed) {
+    if (!videoPlayer) return;
+    videoPlayer.playbackRate = speed;
+    if (videoSpeedText) videoSpeedText.textContent = `${speed.toFixed(speed % 1 === 0 ? 1 : 2)}x`;
+    showToast(`재생 배속: ${speed}x`);
+}
+
+function cycleVideoSpeed() {
+    currentSpeedIndex = (currentSpeedIndex + 1) % SPEED_STEPS.length;
+    setVideoSpeed(SPEED_STEPS[currentSpeedIndex]);
+}
+
+if (btnVideoSpeed) {
+    btnVideoSpeed.addEventListener('click', cycleVideoSpeed);
+}
+
+// -------------------------------------------------------------
+// MediaSession API Integration (Lockscreen & Bluetooth Headset Control)
+// -------------------------------------------------------------
+function setupMediaSession(video) {
+    if (!('mediaSession' in navigator)) return;
+    try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: video.name,
+            artist: 'MyCloud Media Player',
+            album: video.folder || 'Public'
+        });
+        navigator.mediaSession.playbackState = 'playing';
+
+        navigator.mediaSession.setActionHandler('play', () => { if (videoPlayer) videoPlayer.play(); });
+        navigator.mediaSession.setActionHandler('pause', () => { if (videoPlayer) videoPlayer.pause(); });
+        navigator.mediaSession.setActionHandler('previoustrack', () => playPrevVideo());
+        navigator.mediaSession.setActionHandler('nexttrack', () => playNextVideo());
+        navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+            if (!videoPlayer) return;
+            const skipTime = details.seekOffset || 10;
+            videoPlayer.currentTime = Math.max(videoPlayer.currentTime - skipTime, 0);
+        });
+        navigator.mediaSession.setActionHandler('seekforward', (details) => {
+            if (!videoPlayer) return;
+            const skipTime = details.seekOffset || 10;
+            videoPlayer.currentTime = Math.min(videoPlayer.currentTime + skipTime, videoPlayer.duration || 0);
+        });
+    } catch (e) {}
+}
+
+if (videoPlayer) {
+    videoPlayer.addEventListener('play', () => {
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    });
+    videoPlayer.addEventListener('pause', () => {
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+    });
+}
