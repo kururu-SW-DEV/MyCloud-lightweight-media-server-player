@@ -6,23 +6,27 @@
 
 :root {
     --bg-dark: #0f172a;
-    --bg-card: #1e293b;
-    --bg-hover: #334155;
+    --bg-card: #182235;
+    --bg-hover: #26334d;
     --accent: #38bdf8;
     --accent-hover: #0ea5e9;
-    --text-main: #f8fafc;
+    --text-main: #f1f5f9;
     --text-muted: #94a3b8;
+    --danger: #ef4444;
+    --danger-hover: #dc2626;
+    --border-card: rgba(255, 255, 255, 0.08);
+    --radius: 8px;
+    --shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+    --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
     --badge-ass: #a855f7;
     --badge-smi: #22c55e;
     --badge-srt: #3b82f6;
     --badge-none: #64748b;
-    --radius: 10px;
-    --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
     --sub-scale: 1;
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+    font-family: var(--font-stack);
     background-color: var(--bg-dark);
     color: var(--text-main);
     min-height: 100vh;
@@ -48,7 +52,8 @@ body {
     background-color: var(--bg-card);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    margin-bottom: 20px;
+    border: 1px solid var(--border-card);
+    margin-bottom: 16px;
     flex-wrap: wrap;
 }
 
@@ -63,12 +68,12 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     border-radius: 8px;
-    background: rgba(56, 189, 248, 0.15);
+    background: rgba(56, 189, 248, 0.12);
     color: var(--accent);
-    border: 1px solid rgba(56, 189, 248, 0.3);
+    border: 1px solid rgba(56, 189, 248, 0.25);
     flex-shrink: 0;
 }
 
@@ -91,18 +96,19 @@ body {
 
 .search-bar input {
     width: 100%;
-    padding: 10px 35px 10px 14px;
+    padding: 8px 32px 8px 13px;
     background-color: var(--bg-dark);
-    border: 1px solid var(--bg-hover);
-    border-radius: 20px;
+    border: 1px solid var(--border-card);
+    border-radius: 7px;
     color: var(--text-main);
-    font-size: 0.95rem;
+    font-size: 0.86rem;
     outline: none;
-    transition: border-color 0.2s;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .search-bar input:focus {
     border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
 }
 
 .clear-btn {
@@ -123,13 +129,19 @@ body {
     gap: 6px;
     text-decoration: none;
     color: var(--text-main);
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bg-hover);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     padding: 7px 12px;
-    border-radius: 8px;
-    font-size: 0.82rem;
+    border-radius: 7px;
+    font-size: 0.84rem;
     font-weight: 600;
-    transition: all 0.2s;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+.btn-explorer-nav:hover {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: rgba(56, 189, 248, 0.4);
+    color: var(--accent);
 }
 .btn-explorer-nav:hover {
     background: rgba(56, 189, 248, 0.15);
@@ -147,17 +159,21 @@ body {
 
 /* Buttons */
 .btn {
-    padding: 8px 14px;
-    border: none;
-    border-radius: 6px;
-    font-size: 0.9rem;
+    padding: 7px 12px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    font-size: 0.84rem;
     font-weight: 600;
     cursor: pointer;
     text-decoration: none;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    transition: background-color 0.2s, transform 0.1s;
+    justify-content: center;
+    gap: 5px;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+    user-select: none;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .btn:active {
@@ -167,10 +183,12 @@ body {
 .btn-secondary {
     background-color: var(--bg-hover);
     color: var(--text-main);
+    border-color: rgba(255, 255, 255, 0.07);
 }
 
 .btn-secondary:hover {
-    background-color: #475569;
+    background-color: #334155;
+    border-color: rgba(255, 255, 255, 0.15);
 }
 
 .btn-small {
@@ -192,8 +210,8 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
-    padding: 0 4px;
+    margin-bottom: 16px;
+    padding: 4px 6px;
     flex-wrap: wrap;
     gap: 12px;
 }
@@ -219,7 +237,7 @@ body {
 }
 
 .crumb.active {
-    color: #cbd5e1;
+    color: var(--text-main);
     cursor: default;
     text-decoration: none;
     font-weight: 700;
@@ -241,25 +259,26 @@ body {
 .view-mode-toggle {
     display: flex;
     background-color: var(--bg-card);
-    border: 1px solid var(--bg-hover);
-    border-radius: 20px;
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
     padding: 3px;
     gap: 3px;
+    box-shadow: var(--shadow);
 }
 
 .btn-mode {
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 0.84rem;
+    font-size: 0.82rem;
     font-weight: 600;
-    padding: 5px 12px;
-    border-radius: 16px;
+    padding: 5px 11px;
+    border-radius: 6px;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    transition: background-color 0.2s, color 0.2s;
+    gap: 5px;
+    transition: background-color 0.15s, color 0.15s;
 }
 
 .btn-mode:hover {
@@ -275,14 +294,15 @@ body {
 .sort-select {
     background-color: var(--bg-card);
     color: var(--text-main);
-    border: 1px solid var(--bg-hover);
+    border: 1px solid var(--border-card);
     padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 0.84rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
     font-weight: 600;
     outline: none;
     cursor: pointer;
-    transition: border-color 0.2s;
+    transition: border-color 0.15s;
+    box-shadow: var(--shadow);
 }
 
 .sort-select:hover, .sort-select:focus {
@@ -292,10 +312,11 @@ body {
 .layout-toggle {
     display: flex;
     background-color: var(--bg-card);
-    border: 1px solid var(--bg-hover);
-    border-radius: 20px;
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
     padding: 3px;
     gap: 3px;
+    box-shadow: var(--shadow);
 }
 
 .btn-layout {
@@ -304,13 +325,13 @@ body {
     color: var(--text-muted);
     font-size: 0.82rem;
     font-weight: 600;
-    padding: 5px 10px;
-    border-radius: 16px;
+    padding: 5px 9px;
+    border-radius: 6px;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    transition: background-color 0.2s, color 0.2s;
+    transition: background-color 0.15s, color 0.15s;
 }
 
 .btn-layout:hover {
@@ -326,10 +347,11 @@ body {
 .meta-toggle {
     display: flex;
     background-color: var(--bg-card);
-    border: 1px solid var(--bg-hover);
-    border-radius: 20px;
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
     padding: 3px;
     gap: 3px;
+    box-shadow: var(--shadow);
 }
 
 .toggle-text-short {
@@ -351,12 +373,15 @@ body {
 }
 
 .stats {
-    font-size: 0.88rem;
+    font-size: 0.82rem;
+    font-weight: 500;
     color: var(--text-muted);
     background: var(--bg-card);
-    padding: 6px 14px;
-    border-radius: 20px;
+    border: 1px solid var(--border-card);
+    padding: 6px 12px;
+    border-radius: 8px;
     white-space: nowrap;
+    box-shadow: var(--shadow);
 }
 
 /* Video & Folder Grid */
@@ -495,23 +520,25 @@ body {
     border-radius: var(--radius);
     overflow: hidden;
     box-shadow: var(--shadow);
-    transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+    border: 1px solid var(--border-card);
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s, background-color 0.2s;
     cursor: pointer;
     display: flex;
     flex-direction: column;
-    border: 1px solid transparent;
+    position: relative;
+    user-select: none;
 }
 
 .folder-card:hover, .video-card:hover {
-    transform: translateY(-2px);
+    transform: translateY(-3px);
     box-shadow: 0 8px 16px -2px rgba(0, 0, 0, 0.4);
-    background-color: var(--bg-hover);
-    border-color: rgba(56, 189, 248, 0.3);
+    border-color: rgba(56, 189, 248, 0.4);
+    background-color: var(--bg-card);
 }
 
 .folder-thumbnail {
     height: 120px;
-    background: linear-gradient(135deg, #1e293b, #0f172a);
+    background: linear-gradient(135deg, #182235, #0f172a);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -519,7 +546,7 @@ body {
 }
 
 .parent-card .folder-thumbnail {
-    background: linear-gradient(135deg, #334155, #1e293b);
+    background: linear-gradient(135deg, #26334d, #182235);
 }
 
 .folder-icon {
@@ -543,7 +570,7 @@ body {
 
 .card-thumbnail {
     height: 150px;
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    background: linear-gradient(135deg, #0f172a 0%, #182235 100%);
     position: relative;
     display: flex;
     align-items: center;
@@ -685,9 +712,9 @@ body {
     min-height: 250px;
     max-width: 98vw;
     max-height: 96vh;
-    background-color: #11151d;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    background-color: #111827;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
     overflow: hidden;
     box-shadow: 0 25px 65px -10px rgba(0, 0, 0, 0.88), 0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 30px rgba(0, 0, 0, 0.6);
     display: flex;
@@ -714,10 +741,10 @@ body.is-dragging {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 9px 14px;
-    background: linear-gradient(180deg, #1f2633 0%, #171d27 100%);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    padding: 10px 14px;
+    background: #182235;
+    border-bottom: 1px solid var(--border-card);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
     cursor: grab;
     user-select: none;
     touch-action: none;
@@ -972,8 +999,8 @@ video::cue {
     justify-content: space-between;
     gap: 8px 14px;
     padding: 9px 16px;
-    background: linear-gradient(180deg, #171d27 0%, #11151d 100%);
-    border-top: 1px solid rgba(255, 255, 255, 0.09);
+    background: #141c2b;
+    border-top: 1px solid var(--border-card);
     font-size: 0.83rem;
     flex-shrink: 0;
     position: relative;

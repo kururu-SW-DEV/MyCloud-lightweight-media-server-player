@@ -30,6 +30,7 @@ let subtitleOffset = 0; // in seconds
 let subScale = 1.0;
 let subBgEnabled = localStorage.getItem('mycloud_sub_bg') !== 'false';
 let currentAvailableTracks = [];
+let userManuallySelectedSubtitle = false;
 let currentCueIndex = -1;
 
 // DOM Elements
@@ -1004,6 +1005,7 @@ window.openPlayer = async function(encodedRelPath) {
     if (!video) return;
     
     activeVideo = video;
+    document.title = `${video.name} - MyCloud Media Player`;
     if (playerTitleText) {
         playerTitleText.textContent = video.name;
     } else if (playerTitle) {
@@ -1079,8 +1081,8 @@ window.openPlayer = async function(encodedRelPath) {
     if (!activeVideo || activeVideo.rel_path !== video.rel_path) return;
     renderSubtitleDropdown(currentAvailableTracks, null);
     
-    // 3. Auto-select Korean subtitle if available
-    if (currentAvailableTracks.length > 0) {
+    // 3. Auto-select Korean subtitle if available (unless user manually picked one)
+    if (!userManuallySelectedSubtitle && currentAvailableTracks.length > 0) {
         // 우선순위 1: lang='kor' 또는 'ko' (내장 한국어)
         let bestTrack = currentAvailableTracks.find(t =>
             t.lang === 'kor' || t.lang === 'ko'
@@ -1278,6 +1280,7 @@ function clearSubtitles() {
 }
 
 subSelect.addEventListener('change', () => {
+    userManuallySelectedSubtitle = true;
     const val = subSelect.value;
     if (val === '' || val === '__loading__') {
         clearSubtitles();
@@ -1618,11 +1621,19 @@ function closePlayer() {
     playerModal.classList.remove('active');
     hasCustomPosition = false;
     activeVideo = null;
+    document.title = 'MyCloud Media Player';
 }
 
 closePlayerBtn.addEventListener('click', closePlayer);
 
 document.addEventListener('keydown', (e) => {
+    // Guard against firing shortcuts while typing in input fields
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) {
+        if (e.key === 'Escape') {
+            e.target.blur();
+        }
+        return;
+    }
     // Suppress player hotkeys when typing in search input or dropdowns (Item 20)
     if (e.target.matches('input, select, textarea') || e.target.isContentEditable) {
         if (e.key === 'Escape') e.target.blur();
@@ -1804,7 +1815,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (targetVideoRel) {
         // Find parent folder of the video to load context
-        const cleanPath = targetVideoRel.replace(/\\/g, '/').replace(/^\/+/, '');
+        let cleanPath = decodeURIComponent(targetVideoRel).replace(/\\/g, '/').replace(/^\/+/, '');
+        if (cleanPath.startsWith('Public/')) {
+            cleanPath = cleanPath.substring(7);
+        }
         const lastSlash = cleanPath.lastIndexOf('/');
         const parentDir = lastSlash !== -1 ? cleanPath.substring(0, lastSlash) : '';
 
@@ -1855,6 +1869,19 @@ if (btnVideoSpeed) {
 // -------------------------------------------------------------
 // MediaSession API Integration (Lockscreen & Bluetooth Headset Control)
 // -------------------------------------------------------------
+function updateMediaSessionPosition() {
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState || !videoPlayer) return;
+    try {
+        if (videoPlayer.duration && isFinite(videoPlayer.duration) && videoPlayer.duration > 0) {
+            navigator.mediaSession.setPositionState({
+                duration: videoPlayer.duration,
+                playbackRate: videoPlayer.playbackRate || 1.0,
+                position: Math.min(Math.max(videoPlayer.currentTime || 0, 0), videoPlayer.duration)
+            });
+        }
+    } catch (e) {}
+}
+
 function setupMediaSession(video) {
     if (!('mediaSession' in navigator)) return;
     try {
@@ -1873,20 +1900,53 @@ function setupMediaSession(video) {
             if (!videoPlayer) return;
             const skipTime = details.seekOffset || 10;
             videoPlayer.currentTime = Math.max(videoPlayer.currentTime - skipTime, 0);
+            updateMediaSessionPosition();
         });
         navigator.mediaSession.setActionHandler('seekforward', (details) => {
             if (!videoPlayer) return;
             const skipTime = details.seekOffset || 10;
             videoPlayer.currentTime = Math.min(videoPlayer.currentTime + skipTime, videoPlayer.duration || 0);
+            updateMediaSessionPosition();
         });
+        try {
+            navigator.mediaSession.setActionHandler('seekto', (details) => {
+                if (!videoPlayer || details.seekTime == null) return;
+                videoPlayer.currentTime = details.seekTime;
+                updateMediaSessionPosition();
+            });
+        } catch (e) {}
+        updateMediaSessionPosition();
     } catch (e) {}
 }
 
 if (videoPlayer) {
+    let lastMsPosUpdate = 0;
     videoPlayer.addEventListener('play', () => {
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+        updateMediaSessionPosition();
     });
     videoPlayer.addEventListener('pause', () => {
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+        updateMediaSessionPosition();
+    });
+    videoPlayer.addEventListener('timeupdate', () => {
+        const now = Date.now();
+        if (now - lastMsPosUpdate > 1000) {
+            lastMsPosUpdate = now;
+            updateMediaSessionPosition();
+        }
+    });
+    videoPlayer.addEventListener('seeked', updateMediaSessionPosition);
+    videoPlayer.addEventListener('ratechange', updateMediaSessionPosition);
+    videoPlayer.addEventListener('loadedmetadata', updateMediaSessionPosition);
+    
+    // Toggle play/pause by clicking directly on video element
+    videoPlayer.addEventListener('click', (e) => {
+        if (e.target !== videoPlayer) return;
+        if (videoPlayer.paused) {
+            videoPlayer.play().catch(() => {});
+        } else {
+            videoPlayer.pause();
+        }
     });
 }
