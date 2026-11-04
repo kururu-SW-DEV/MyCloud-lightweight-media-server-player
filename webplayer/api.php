@@ -59,7 +59,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'probe_subs') {
     }
     
     // 1. High-speed zero-disk pure Python MKV probe (< 0.05s vs 2.5s avconv)
-    $fastCmd = 'python /shares/Public/webplayer/stream_sub.py probe ' . safeShellArg($fullVideoPath) . ' 2>/dev/null';
+    $fastCmd = 'python /shares/webplayer/stream_sub.py probe ' . safeShellArg($fullVideoPath) . ' 2>/dev/null';
     $fastOut = @shell_exec($fastCmd);
     if (!empty($fastOut)) {
         $fastJson = @json_decode($fastOut, true);
@@ -188,7 +188,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
     }
     
     // Unified zero-disk high-speed stream with process supervision & orphan prevention
-    $cmd = 'exec python /shares/Public/webplayer/stream_sub.py ' . safeShellArg($fullVideoPath) . ' ' . $streamId;
+    $cmd = 'exec python /shares/webplayer/stream_sub.py ' . safeShellArg($fullVideoPath) . ' ' . $streamId;
     $descriptors = array(
         0 => array('pipe', 'r'),
         1 => array('pipe', 'w'),

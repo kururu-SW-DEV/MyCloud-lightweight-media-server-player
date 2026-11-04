@@ -1,3 +1,19 @@
+// Clean Modern Monochrome SVG Icons (Zero Emoji / Zero AI-Slop)
+const PLAYER_SVG = {
+    folder: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
+    folderParent: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 12 11 9 14"></polyline><line x1="12" y1="11" x2="12" y2="21"></line><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
+    folderSmall: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:-1.5px; margin-right:3px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
+    home: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="crumb-icon"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>`,
+    video: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="crumb-icon"><rect x="2" y="4" width="20" height="16" rx="2"></rect><polygon points="10 9 15 12 10 15 10 9" fill="currentColor"></polygon></svg>`,
+    play: `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>`,
+    minimize: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="20" y2="12"></line></svg>`,
+    restore: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`,
+    fullscreen: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>`,
+    exitFullscreen: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>`,
+    subBgOn: `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>`,
+    subBgOff: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>`
+};
+
 // MyCloud Web Media Player Client App
 
 let currentMode = 'folder'; // 'folder' or 'all'
@@ -235,10 +251,10 @@ function playNextVideo() {
     const nextIndex = currentIndex + 1;
     if (nextIndex < sortedVideos.length) {
         const nextVideo = sortedVideos[nextIndex];
-        showToast(`⏭️ 다음 영상 자동 재생: ${nextVideo.name}`);
+        showToast(`다음 영상 자동 재생: ${nextVideo.name}`);
         openPlayer(encodeURIComponent(nextVideo.rel_path));
     } else {
-        showToast('🏁 마지막 영상입니다.');
+        showToast('마지막 영상입니다.');
     }
 }
 
@@ -252,7 +268,7 @@ function playPrevVideo() {
     const prevIndex = currentIndex - 1;
     if (prevIndex >= 0) {
         const prevVideo = sortedVideos[prevIndex];
-        showToast(`⏮️ 이전 영상 재생: ${prevVideo.name}`);
+        showToast(`이전 영상 재생: ${prevVideo.name}`);
         openPlayer(encodeURIComponent(prevVideo.rel_path));
     } else {
         showToast('첫 번째 영상입니다.');
@@ -314,10 +330,9 @@ function toggleFullscreen() {
 // -------------------------------------------------------------
 function updateMinimizeBtnUI() {
     if (!minimizeBtn) return;
-    // 🗕/🗖 (window-control pictographs) render as broken/tofu glyphs on a lot
-    // of Android devices - Noto Color Emoji doesn't reliably cover that block.
-    // 🔼/🔽 are core emoji, universally supported.
-    minimizeBtn.innerHTML = isMinimized ? '🔼 복원' : '🔽 최소화';
+    minimizeBtn.innerHTML = isMinimized 
+        ? `${PLAYER_SVG.restore} <span>복원</span>` 
+        : `${PLAYER_SVG.minimize} <span>최소화</span>`;
     minimizeBtn.title = isMinimized ? '원래 크기로 복원 (단축키: M)' : '최소화 (영상은 계속 재생됨, 단축키: M)';
 }
 
@@ -484,9 +499,9 @@ function handleFullscreenChange() {
 
     // Update Fullscreen button text in modal header
     if (fullscreenBtn) {
-        // 🗗 is the same problem-block pictograph as 🗕/🗖 above - reuse ⛶ for
-        // both states instead of introducing another unverified glyph.
-        fullscreenBtn.innerHTML = isFs ? '⛶ 전체화면 해제' : '⛶ 전체화면';
+        fullscreenBtn.innerHTML = isFs 
+            ? `${PLAYER_SVG.exitFullscreen} <span>창모드</span>` 
+            : `${PLAYER_SVG.fullscreen} <span>전체화면</span>`;
         fullscreenBtn.title = isFs ? '전체화면 해제 (단축키: F 또는 Esc)' : '전체화면 (단축키: F 또는 더블클릭)';
     }
 
@@ -653,20 +668,20 @@ function updateBreadcrumbs() {
     
     if (currentMode === 'all') {
         breadcrumbsContainer.innerHTML = `
-            <span class="crumb" onclick="switchMode('folder', '')">🏠 Public</span>
+            <span class="crumb" onclick="switchMode('folder', '')">${PLAYER_SVG.home} <span>Public</span></span>
             <span class="crumb-sep">›</span>
-            <span class="crumb active">🎬 전체 영상 모아보기</span>
+            <span class="crumb active">${PLAYER_SVG.video} <span>전체 영상 모아보기</span></span>
         `;
         return;
     }
     
     if (!currentDir) {
-        breadcrumbsContainer.innerHTML = `<span class="crumb active" data-path="">🏠 Public</span>`;
+        breadcrumbsContainer.innerHTML = `<span class="crumb active" data-path="">${PLAYER_SVG.home} <span>Public</span></span>`;
         return;
     }
     
     const parts = currentDir.split('/');
-    let html = `<span class="crumb" onclick="openFolder('')">🏠 Public</span>`;
+    let html = `<span class="crumb" onclick="openFolder('')">${PLAYER_SVG.home} <span>Public</span></span>`;
     let accumulated = '';
     
     parts.forEach((p, idx) => {
@@ -767,7 +782,7 @@ function applySortAndRender() {
                     <div class="loading-spinner">
                         현재 폴더에 '<strong>${escapeHtml(query)}</strong>' 검색 결과가 없습니다.<br><br>
                         <button type="button" class="btn btn-secondary search-all-fallback-btn">
-                            🎬 전체 영상 모아보기에서 검색하기
+                            전체 영상 모아보기에서 검색하기
                         </button>
                     </div>
                 `;
@@ -857,7 +872,7 @@ function renderGrid(dirs, videos) {
     if ((!dirs || dirs.length === 0) && (!videos || videos.length === 0)) {
         let emptyHtml = '<div class="loading-spinner">표시할 항목이 없습니다.';
         if (currentMode === 'folder' && currentParentDir !== null) {
-            emptyHtml += `<br><br><button onclick="openFolder('${pathEncode(currentParentDir)}')" class="btn btn-secondary">⬆️ 상위 폴더로 이동</button>`;
+            emptyHtml += `<br><br><button onclick="openFolder('${pathEncode(currentParentDir)}')" class="btn btn-secondary">상위 폴더로 이동</button>`;
         }
         emptyHtml += '</div>';
         videoGrid.innerHTML = emptyHtml;
@@ -871,7 +886,7 @@ function renderGrid(dirs, videos) {
             <div class="folder-card parent-card" onclick="openFolder('${pathEncode(currentParentDir)}')">
                 <div class="folder-thumbnail">
                     <span class="card-folder-badge">상위</span>
-                    <div class="folder-icon">⬆️</div>
+                    <div class="folder-icon">${PLAYER_SVG.folderParent}</div>
                 </div>
                 <div class="card-content">
                     <div class="list-main-col">
@@ -879,7 +894,7 @@ function renderGrid(dirs, videos) {
                     </div>
                     <div class="list-sub-col">
                         <div class="card-meta">
-                            <span>클릭 시 이전 폴더로 이동</span>
+                            <span>상위 폴더로 이동</span>
                         </div>
                     </div>
                 </div>
@@ -889,20 +904,20 @@ function renderGrid(dirs, videos) {
     
     if (dirs && dirs.length > 0) {
         dirs.forEach(d => {
-            let metaDesc = '📁 폴더';
+            let metaDesc = '폴더';
             if (d.video_count > 0 && d.subdir_count > 0) {
-                metaDesc = `🎬 영상 ${d.video_count}개 · 📁 ${d.subdir_count}개`;
+                metaDesc = `영상 ${d.video_count}개 · 하위 폴더 ${d.subdir_count}개`;
             } else if (d.video_count > 0) {
-                metaDesc = `🎬 영상 ${d.video_count}개`;
+                metaDesc = `영상 ${d.video_count}개`;
             } else if (d.subdir_count > 0) {
-                metaDesc = `📁 하위 폴더 ${d.subdir_count}개`;
+                metaDesc = `하위 폴더 ${d.subdir_count}개`;
             }
             
             html += `
                 <div class="folder-card" onclick="openFolder('${pathEncode(d.rel_path)}')">
                     <div class="folder-thumbnail">
                         <span class="card-folder-badge">폴더</span>
-                        <div class="folder-icon">📁</div>
+                        <div class="folder-icon">${PLAYER_SVG.folder}</div>
                     </div>
                     <div class="card-content">
                         <div class="list-main-col">
@@ -931,14 +946,14 @@ function renderGrid(dirs, videos) {
             }
             
             const folderTag = (currentMode === 'all' && v.folder)
-                ? `<div class="card-folder-path" title="${escapeHtml(v.folder)}">📁 ${escapeHtml(v.folder)}</div>`
+                ? `<div class="card-folder-path" title="${escapeHtml(v.folder)}">${PLAYER_SVG.folderSmall} <span>${escapeHtml(v.folder)}</span></div>`
                 : '';
                 
             html += `
                 <div class="video-card" onclick="openPlayer('${pathEncode(v.rel_path)}')">
                     <div class="card-thumbnail">
                         <span class="card-format-badge">${v.ext}</span>
-                        <div class="play-icon-overlay">▶</div>
+                        <div class="play-icon-overlay">${PLAYER_SVG.play}</div>
                     </div>
                     <div class="card-content">
                         <div class="list-main-col">
@@ -947,8 +962,8 @@ function renderGrid(dirs, videos) {
                         </div>
                         <div class="list-sub-col">
                             <div class="card-meta">
-                                <span class="meta-size">💾 ${v.size_formatted}</span>
-                                <span class="meta-date">📅 ${(v.mtime_formatted || '').split(' ')[0]}</span>
+                                <span class="meta-size">${v.size_formatted}</span>
+                                <span class="meta-date">${(v.mtime_formatted || '').split(' ')[0]}</span>
                             </div>
                             <div class="card-badges">
                                 ${badgesHtml}
@@ -1013,7 +1028,7 @@ window.openPlayer = async function(encodedRelPath) {
         });
     }
     
-    renderSubtitleDropdown(currentAvailableTracks, '⏳ 내장 자막 확인 중...');
+    renderSubtitleDropdown(currentAvailableTracks, '내장 자막 확인 중...');
     
     playerModal.classList.add('active');
     applySubtitleStyle();
@@ -1132,7 +1147,7 @@ async function loadSelectedTrack(track) {
         parsedSubtitles = cached;
         syncCuesToTextTrack();
         updateSubtitleDisplay();
-        showToast(`⚡ 자막 즉시 로드 완료 (${parsedSubtitles.length}개 자막)`);
+        showToast(`자막 즉시 로드 완료 (${parsedSubtitles.length}개 자막)`);
         return;
     }
     
@@ -1148,7 +1163,7 @@ async function loadSelectedTrack(track) {
                       (track.ext && (track.ext.toLowerCase() === 'ass' || track.ext.toLowerCase() === 'ssa'));
         const isSami = track.ext && (track.ext.toLowerCase() === 'smi' || track.ext.toLowerCase() === 'sami');
         
-        showToast(`⏳ [${track.label}] 실시간 읽는 중...`);
+        showToast(`[${track.label}] 실시간 읽는 중...`);
         
         const url = isEmbedded
             ? `api.php?action=stream_sub&video=${encodeURIComponent(track.relPath)}&stream=${track.streamId}&codec=${encodeURIComponent(track.codec)}`
@@ -1170,7 +1185,7 @@ async function loadSelectedTrack(track) {
             }
             syncCuesToTextTrack();
             updateSubtitleDisplay();
-            showToast(`✅ 자막 로드 완료 (${parsedSubtitles.length}개 자막)`);
+            showToast(`자막 로드 완료 (${parsedSubtitles.length}개 자막)`);
             return;
         }
         
@@ -1201,7 +1216,7 @@ async function loadSelectedTrack(track) {
                     updateTimer = setTimeout(() => {
                         updateTimer = null;
                         if (parsedSubtitles.length > 0 && !currentSignal.aborted) {
-                            showToast(`⏳ 자막 실시간 읽는 중... (${parsedSubtitles.length}개)`);
+                            showToast(`자막 실시간 읽는 중... (${parsedSubtitles.length}개)`);
                         }
                     }, 800);
                 }
@@ -1219,12 +1234,12 @@ async function loadSelectedTrack(track) {
 
         syncCuesToTextTrack();
         updateSubtitleDisplay();
-        showToast(`✅ 자막 로드 완료 (${parsedSubtitles.length}개 자막)`);
+        showToast(`자막 로드 완료 (${parsedSubtitles.length}개 자막)`);
         
     } catch (err) {
         if (err.name === 'AbortError') return;
         console.error('Failed to load subtitle:', err);
-        showToast(`❌ 자막 로드 실패: ${err.message}`);
+        showToast(`자막 로드 실패: ${err.message}`);
     }
 }
 
@@ -1476,7 +1491,7 @@ function applySubtitleStyle() {
         }
     }
     if (subBgToggleBtn) {
-        subBgToggleBtn.textContent = subBgEnabled ? '🔳 배경: 있음' : '🔲 배경: 없음';
+        subBgToggleBtn.innerHTML = subBgEnabled ? `${PLAYER_SVG.subBgOn} <span>배경: 있음</span>` : `${PLAYER_SVG.subBgOff} <span>배경: 없음</span>`;
     }
     
     // 2. Set root CSS variable for windowed subtitle box
@@ -1712,8 +1727,35 @@ window.addEventListener('resize', () => {
     }
 });
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     applySubtitleStyle();
     setLayoutMode(currentLayout);
-    loadData('', 'folder');
+
+    // Check for auto-open video param from WebExplorer or direct link (e.g. ?open=Path/To/Video.mkv)
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetVideoRel = urlParams.get('open') || urlParams.get('video');
+
+    if (targetVideoRel) {
+        // Find parent folder of the video to load context
+        const cleanPath = targetVideoRel.replace(/\\/g, '/').replace(/^\/+/, '');
+        const lastSlash = cleanPath.lastIndexOf('/');
+        const parentDir = lastSlash !== -1 ? cleanPath.substring(0, lastSlash) : '';
+
+        await loadData(parentDir, 'folder');
+
+        // Locate and open the requested video immediately
+        const found = currentVideos.find(v => v.rel_path === cleanPath || v.rel_path.endsWith('/' + cleanPath) || cleanPath.endsWith(v.rel_path));
+        if (found) {
+            openPlayer(encodeURIComponent(found.rel_path));
+        } else {
+            // If not found in parent folder, try searching in all mode
+            await loadData('', 'all');
+            const foundAll = currentVideos.find(v => v.rel_path === cleanPath || v.rel_path.endsWith('/' + cleanPath) || cleanPath.endsWith(v.rel_path));
+            if (foundAll) {
+                openPlayer(encodeURIComponent(foundAll.rel_path));
+            }
+        }
+    } else {
+        loadData('', 'folder');
+    }
 });

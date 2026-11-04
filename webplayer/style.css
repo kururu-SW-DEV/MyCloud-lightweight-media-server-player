@@ -26,6 +26,10 @@ body {
     background-color: var(--bg-dark);
     color: var(--text-main);
     min-height: 100vh;
+    min-height: 100dvh;
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    padding-bottom: env(safe-area-inset-bottom);
 }
 
 .app-container {
@@ -55,8 +59,17 @@ body {
     user-select: none;
 }
 
-.brand .icon {
-    font-size: 1.8rem;
+.brand-logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--accent);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    flex-shrink: 0;
 }
 
 .brand h1 {
@@ -101,6 +114,30 @@ body {
     font-size: 1.2rem;
     cursor: pointer;
     display: none;
+}
+
+
+.btn-explorer-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+.btn-explorer-nav:hover {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: rgba(56, 189, 248, 0.4);
+    color: var(--accent);
+}
+.btn-explorer-nav svg {
+    flex-shrink: 0;
 }
 
 .nav-actions {
@@ -219,6 +256,9 @@ body {
     padding: 5px 12px;
     border-radius: 16px;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     transition: background-color 0.2s, color 0.2s;
 }
 
@@ -355,7 +395,15 @@ body {
 }
 
 .video-grid.list-view .folder-icon {
-    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+}
+
+.video-grid.list-view .folder-icon svg {
+    width: 24px;
+    height: 24px;
 }
 
 .video-grid.list-view .card-folder-badge,
@@ -364,11 +412,24 @@ body {
 }
 
 .video-grid.list-view .play-icon-overlay {
-    opacity: 0.7;
-    font-size: 1.2rem;
-    transform: none;
-    background: none;
+    width: 32px;
+    height: 32px;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
     box-shadow: none;
+    transform: none;
+    flex-shrink: 0;
+}
+
+.video-grid.list-view .video-card:hover .play-icon-overlay {
+    transform: scale(1.06);
+    background: var(--accent);
+    color: #0f172a;
 }
 
 .video-grid.list-view .card-content {
@@ -462,13 +523,22 @@ body {
 }
 
 .folder-icon {
-    font-size: 3.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
     opacity: 0.85;
-    transition: transform 0.2s;
+    transition: transform 0.2s, color 0.2s;
+}
+
+.folder-icon svg {
+    width: 48px;
+    height: 48px;
 }
 
 .folder-card:hover .folder-icon {
     transform: scale(1.1);
+    color: #7dd3fc;
 }
 
 .card-thumbnail {
@@ -1100,31 +1170,106 @@ video::cue {
 }
 
 @media (max-width: 640px) {
+    .navbar {
+        padding: 10px 12px;
+        gap: 8px;
+    }
+    .breadcrumb-container {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+    .toolbar-right {
+        width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+        padding-bottom: 3px;
+        gap: 6px;
+    }
+    .toolbar-right::-webkit-scrollbar {
+        display: none;
+    }
+    .view-mode-toggle, .layout-toggle, .meta-toggle, .sort-select {
+        flex-shrink: 0;
+    }
     .modal-dialog {
         width: 98vw;
-        max-height: 98vh;
+        max-height: 96vh;
+        border-radius: 10px;
+    }
+    .modal-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
     }
     .modal-header-actions .btn-small {
-        padding: 4px 6px;
-        font-size: 0.76rem;
+        flex-shrink: 0;
+        padding: 5px 8px;
+        font-size: 0.74rem;
     }
     .modal-footer {
-        padding: 6px 10px;
-        gap: 6px 8px;
+        overflow-x: auto;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+        gap: 8px;
+        padding: 8px 10px;
+    }
+    .modal-footer::-webkit-scrollbar {
+        display: none;
     }
     .control-group {
+        flex-shrink: 0;
         gap: 4px;
     }
     .control-group .btn-small {
-        padding: 3px 6px;
+        padding: 4px 7px;
         font-size: 0.76rem;
     }
     .select-input {
-        max-width: 150px;
+        max-width: 130px;
         font-size: 0.78rem;
     }
     .subtitle-box {
-        font-size: 1.1rem;
+        font-size: 1.05rem;
         bottom: 40px;
     }
+}
+
+/* Modal Drag & Action Buttons SVG alignment */
+.drag-handle-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    cursor: grab;
+    flex-shrink: 0;
+    margin-right: 4px;
+}
+.drag-handle-icon svg {
+    pointer-events: none;
+}
+.modal-header-actions .btn-small {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.modal-footer .btn-small {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.modal-resize-handle {
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: 3px;
+    color: rgba(255, 255, 255, 0.3);
+}
+.modal-resize-handle svg {
+    pointer-events: none;
 }

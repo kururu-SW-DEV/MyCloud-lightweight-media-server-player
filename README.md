@@ -72,11 +72,11 @@ export NAS_GROUP=share
 `NAS_HOST`/`NAS_PORT`/`NAS_USERNAME`은 각각 기본값(`192.168.0.7`, `22`, `root`)이 있어 생략 가능하지만, `NAS_PASSWORD`는 반드시 설정해야 합니다.
 
 ### 4. NAS 측 최초 1회 수동 설정
-`deploy_webplayer.py`는 `webplayer/`, `apache/` 아래 파일들을 NAS의 `/shares/Public/webplayer`로 복사하고 Apache를 재시작해줄 뿐, 아래 설정은 대신해주지 않습니다. NAS에 SSH로 접속해 최초 1번만 해주세요.
+`deploy_webplayer.py`는 `webplayer/`, `apache/` 아래 파일들을 NAS의 `/shares/webplayer`로 복사하고 Apache를 재시작해줄 뿐, 아래 설정은 대신해주지 않습니다. NAS에 SSH로 접속해 최초 1번만 해주세요.
 
 1. **Apache에 설정 포함**: `apache/apache_webplayer.conf`의 내용을 NAS의 Apache 메인 설정(예: `/etc/apache2/apache2.conf`)에 포함시킵니다.
    ```
-   Include /shares/Public/webplayer/apache_webplayer.conf
+   Include /shares/webplayer/apache_webplayer.conf
    ```
 2. **외부 접속용 계정 생성** (선택, 포트포워딩으로 외부 노출 시 필요 — `apache_webplayer.conf`가 LAN 밖 IP에는 Basic 인증을 요구하도록 이미 구성돼 있음):
    ```bash

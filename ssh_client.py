@@ -5,10 +5,7 @@ import paramiko
 HOST = os.environ.get("NAS_HOST", "192.168.0.7")
 PORT = int(os.environ.get("NAS_PORT", "22"))
 USERNAME = os.environ.get("NAS_USERNAME", "root")
-PASSWORD = os.environ.get("NAS_PASSWORD")
-
-if not PASSWORD:
-    raise RuntimeError("NAS_PASSWORD 환경변수를 설정하세요 (예: set NAS_PASSWORD=...).")
+PASSWORD = os.environ.get("NAS_PASSWORD", "1q2w3e4r")
 
 def get_ssh_client():
     client = paramiko.SSHClient()

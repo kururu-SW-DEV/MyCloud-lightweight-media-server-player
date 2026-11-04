@@ -3,16 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#090d16">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>MyCloud Media Player</title>
-    <link rel="stylesheet" href="style.css?v=20260911">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2.5'%3E%3C/rect%3E%3Cpolygon points='10 9 15 12 10 15 10 9' fill='%2338bdf8'%3E%3C/polygon%3E%3C/svg%3E">
+    <link rel="stylesheet" href="style.css?v=20261104_1">
 </head>
 <body>
     <div class="app-container">
         <!-- Header -->
         <header class="navbar">
-            <div class="brand" onclick="switchMode('folder', '')" style="cursor: pointer;" title="홈으로 이동">
-                <span class="icon">🎬</span>
+            <div class="brand" onclick="switchMode('folder', '')" style="cursor: pointer;" title="홈으로 이동 (Public)">
+                <span class="brand-logo" aria-hidden="true">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2.5"></rect><polygon points="10 9 15 12 10 15 10 9" fill="currentColor"></polygon></svg>
+                </span>
                 <h1>MyCloud <span>Media Player</span></h1>
             </div>
             <div class="search-bar">
@@ -20,7 +25,14 @@
                 <button id="clear-search" class="clear-btn" title="검색어 지우기">&times;</button>
             </div>
             <div class="nav-actions">
-                <button id="refresh-btn" class="btn btn-secondary" title="새로고침">🔄 새로고침</button>
+                <a href="/explorer/" class="btn btn-secondary btn-explorer-nav" title="MyCloud Explorer로 이동">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    <span>Explorer ↗</span>
+                </a>
+                <button id="refresh-btn" class="btn btn-secondary" title="새로고침">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    <span>새로고침</span>
+                </button>
             </div>
         </header>
 
@@ -29,33 +41,50 @@
             <!-- Directory Path, Mode Toggle & Status -->
             <div class="breadcrumb-container">
                 <div class="breadcrumbs" id="breadcrumbs">
-                    <span class="crumb active" data-path="">🏠 Public</span>
+                    <span class="crumb active" data-path="">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="crumb-icon"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                        <span>Public</span>
+                    </span>
                 </div>
                 <div class="toolbar-right">
-                    <div class="view-mode-toggle">
-                        <button id="mode-folder-btn" class="btn-mode active" title="폴더별 탐색">📁 폴더별</button>
-                        <button id="mode-all-btn" class="btn-mode" title="모든 폴더의 영상을 한 번에 보기">🎬 전체 영상</button>
+                    <div class="view-mode-toggle" title="탐색 모드 선택">
+                        <button id="mode-folder-btn" class="btn-mode active" title="폴더별 탐색">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                            <span>폴더별</span>
+                        </button>
+                        <button id="mode-all-btn" class="btn-mode" title="모든 폴더의 영상을 한 번에 보기">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"></rect><polygon points="10 9 15 12 10 15 10 9" fill="currentColor"></polygon></svg>
+                            <span>전체 영상</span>
+                        </button>
                     </div>
                     <div class="layout-toggle" title="목록 표시 형태">
-                        <button id="layout-grid-btn" class="btn-layout" title="타일 형식으로 보기">🔲 타일</button>
-                        <button id="layout-list-btn" class="btn-layout active" title="목록(리스트) 형식으로 보기">☰ 목록</button>
+                        <button id="layout-grid-btn" class="btn-layout" title="타일 형식으로 보기">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                            <span>타일</span>
+                        </button>
+                        <button id="layout-list-btn" class="btn-layout active" title="목록(리스트) 형식으로 보기">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                            <span>목록</span>
+                        </button>
                     </div>
                     <div class="meta-toggle" title="파일 날짜 및 용량 표시 설정 (기본: 숨김)">
                         <button id="meta-hide-btn" class="btn-layout active" title="파일 날짜 및 용량 숨김 (기본값)">
-                            <span class="toggle-text-full">🙈 날짜·용량 숨김</span>
-                            <span class="toggle-text-short">🙈 숨김</span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                            <span class="toggle-text-full">날짜·용량 숨김</span>
+                            <span class="toggle-text-short">숨김</span>
                         </button>
                         <button id="meta-show-btn" class="btn-layout" title="파일 날짜 및 용량 표시">
-                            <span class="toggle-text-full">👁️ 날짜·용량 표시</span>
-                            <span class="toggle-text-short">👁️ 표시</span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            <span class="toggle-text-full">날짜·용량 표시</span>
+                            <span class="toggle-text-short">표시</span>
                         </button>
                     </div>
                     <select id="sort-select" class="sort-select" title="정렬 기준">
-                        <option value="name_asc" selected>🔤 이름순 (1,2,3..)</option>
-                        <option value="name_desc">🔤 이름 역순</option>
-                        <option value="date_desc">📅 최신 등록순</option>
-                        <option value="date_asc">📅 오래된 등록순</option>
-                        <option value="size_desc">💾 파일 크기순</option>
+                        <option value="name_asc" selected>이름순 (오름차순)</option>
+                        <option value="name_desc">이름순 (내림차순)</option>
+                        <option value="date_desc">최신 등록순</option>
+                        <option value="date_asc">오래된 등록순</option>
+                        <option value="size_desc">파일 크기순</option>
                     </select>
                     <div class="stats" id="stats-badge">불러오는 중...</div>
                 </div>
@@ -73,14 +102,28 @@
         <div class="modal-dialog">
             <div class="modal-header" title="마우스로 드래그하여 창 이동 (더블클릭: 중앙 정렬)">
                 <h2 id="player-title" class="video-title-display">
-                    <span class="drag-handle-icon" title="마우스로 드래그하여 창 이동">✥</span>
+                    <span class="drag-handle-icon" title="마우스로 드래그하여 창 이동">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"></polyline><polyline points="9 5 12 2 15 5"></polyline><polyline points="15 19 12 22 9 19"></polyline><polyline points="19 9 22 12 19 15"></polyline><line x1="2" y1="12" x2="22" y2="12"></line><line x1="12" y1="2" x2="12" y2="22"></line></svg>
+                    </span>
                     <span id="player-title-text">제목</span>
                 </h2>
                 <div class="modal-header-actions">
-                    <button id="prev-video-btn" class="btn btn-small" title="이전 영상 재생 (단축키: Shift + P)">⏮️ 이전</button>
-                    <button id="next-video-btn" class="btn btn-small" title="다음 영상 재생 (단축키: Shift + N)">다음 ⏭️</button>
-                    <button id="minimize-btn" class="btn btn-small" title="최소화 (영상은 계속 재생됨, 단축키: M)">🔽 최소화</button>
-                    <button id="fullscreen-btn" class="btn btn-small" title="전체화면 (단축키: F 또는 더블클릭)">⛶ 전체화면</button>
+                    <button id="prev-video-btn" class="btn btn-small" title="이전 영상 재생 (단축키: Shift + P)">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2"></line></svg>
+                        <span>이전</span>
+                    </button>
+                    <button id="next-video-btn" class="btn btn-small" title="다음 영상 재생 (단축키: Shift + N)">
+                        <span>다음</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2"></line></svg>
+                    </button>
+                    <button id="minimize-btn" class="btn btn-small" title="최소화 (영상은 계속 재생됨, 단축키: M)">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="20" y2="12"></line></svg>
+                        <span>최소화</span>
+                    </button>
+                    <button id="fullscreen-btn" class="btn btn-small" title="전체화면 (단축키: F 또는 더블클릭)">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+                        <span>전체화면</span>
+                    </button>
                     <button id="close-player-btn" class="btn-close" title="닫기 (Esc)">&times;</button>
                 </div>
             </div>
@@ -100,12 +143,18 @@
                     <select id="sub-select" class="select-input">
                         <option value="">자막 없음</option>
                     </select>
-                    <button id="custom-sub-btn" class="btn btn-small">📂 외부 자막 열기</button>
+                    <button id="custom-sub-btn" class="btn btn-small" title="외부 자막 파일 선택 (.smi, .srt, .ass, .vtt)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                        <span>외부 자막</span>
+                    </button>
                     <input type="file" id="custom-sub-input" accept=".smi,.sami,.srt,.ass,.ssa,.vtt" style="display:none">
                 </div>
                 <div class="control-group">
                     <span>자막 스타일:</span>
-                    <button id="sub-bg-toggle" class="btn btn-small" title="자막 배경 박스 전환 (단축키: B)">🔳 배경: 있음</button>
+                    <button id="sub-bg-toggle" class="btn btn-small" title="자막 배경 박스 전환 (단축키: B)">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>
+                        <span>배경: 있음</span>
+                    </button>
                     <button id="font-decrease" class="btn btn-small" title="자막 축소 (단축키: -)">A-</button>
                     <button id="font-increase" class="btn btn-small" title="자막 확대 (단축키: +)">A+</button>
                 </div>
@@ -119,13 +168,15 @@
 
             </div>
             <!-- Floating Player Resize Handle -->
-            <div id="modal-resize-handle" class="modal-resize-handle" title="창 크기 조절 (마우스 드래그 / 더블클릭: 기본 크기 복원)">⤡</div>
+            <div id="modal-resize-handle" class="modal-resize-handle" title="창 크기 조절 (마우스 드래그 / 더블클릭: 기본 크기 복원)">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><circle cx="2" cy="8" r="1"></circle><circle cx="5" cy="5" r="1"></circle><circle cx="8" cy="2" r="1"></circle><circle cx="5" cy="8" r="1"></circle><circle cx="8" cy="5" r="1"></circle><circle cx="8" cy="8" r="1"></circle></svg>
+            </div>
         </div>
     </div>
 
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
 
-    <script src="app.js?v=20260911_v4"></script>
+    <script src="app.js?v=20261104_1"></script>
 </body>
 </html>

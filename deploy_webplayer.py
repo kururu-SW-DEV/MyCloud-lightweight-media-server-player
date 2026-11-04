@@ -4,8 +4,8 @@ import re
 import time
 from ssh_client import get_ssh_client
 
-APACHE_CONF = """Alias /player /shares/Public/webplayer
-<Directory /shares/Public/webplayer>
+APACHE_CONF = """Alias /player /shares/webplayer
+<Directory /shares/webplayer>
     Options Indexes FollowSymLinks
     AllowOverride All
     Require all granted
@@ -783,7 +783,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'probe_subs') {
     }
     
     // 1. High-speed zero-disk pure Python MKV probe (< 0.05s vs 2.5s avconv)
-    $fastCmd = 'python /shares/Public/webplayer/stream_sub.py probe ' . safeShellArg($fullVideoPath) . ' 2>/dev/null';
+    $fastCmd = 'python /shares/webplayer/stream_sub.py probe ' . safeShellArg($fullVideoPath) . ' 2>/dev/null';
     $fastOut = @shell_exec($fastCmd);
     if (!empty($fastOut)) {
         $fastJson = @json_decode($fastOut, true);
@@ -906,7 +906,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
     }
     
     // Unified zero-disk high-speed stream with process supervision & orphan prevention
-    $cmd = 'exec python /shares/Public/webplayer/stream_sub.py ' . safeShellArg($fullVideoPath) . ' ' . $streamId;
+    $cmd = 'exec python /shares/webplayer/stream_sub.py ' . safeShellArg($fullVideoPath) . ' ' . $streamId;
     $descriptors = array(
         0 => array('pipe', 'r'),
         1 => array('pipe', 'w'),
@@ -3899,7 +3899,7 @@ def main():
     
     try:
         print("[2] Cleaning up old background extractor processes & disk cache...")
-        client.exec_command('killall -9 avconv python 2>/dev/null; rm -rf /shares/Public/webplayer/cache/subtitles /shares/Public/webplayer/extract_subtitles.py /shares/Public/webplayer/extract.log /tmp/tmp_sub_* /tmp/test_* /tmp/webplayer_sub_ram/*')
+        client.exec_command('mkdir -p /shares/webplayer; killall -9 avconv python 2>/dev/null; rm -rf /shares/webplayer/cache/subtitles /shares/webplayer/extract_subtitles.py /shares/webplayer/extract.log /tmp/tmp_sub_* /tmp/test_* /tmp/webplayer_sub_ram/*')
         
         print("[3] Installing Apache webplayer configuration...")
         with sftp.open('/etc/apache2/conf.d/webplayer.conf', 'wb') as f:
@@ -3911,11 +3911,11 @@ def main():
         print(f"Apache test: {chk.strip()}")
         
         print("[5] Writing stream_sub.py (Zero-disk demuxer)...")
-        with sftp.open('/shares/Public/webplayer/stream_sub.py', 'wb') as f:
+        with sftp.open('/shares/webplayer/stream_sub.py', 'wb') as f:
             f.write(get_file_content('stream_sub.py', STREAM_SUB_PY))
             
         print("[6] Writing api.php...")
-        with sftp.open('/shares/Public/webplayer/api.php', 'wb') as f:
+        with sftp.open('/shares/webplayer/api.php', 'wb') as f:
             f.write(get_file_content('api.php', API_PHP))
             
         print("[7] Writing index.html...")
@@ -3931,21 +3931,21 @@ def main():
         # over from a hand-edited version string (e.g. "?v=20260911_v3") gets
         # replaced outright instead of prepended-to.
         index_content = re.sub(br'\?v=[^"\']*', b'?v=' + cache_version.encode('ascii'), index_content)
-        with sftp.open('/shares/Public/webplayer/index.html', 'wb') as f:
+        with sftp.open('/shares/webplayer/index.html', 'wb') as f:
             f.write(index_content)
             
         print("[8] Writing style.css...")
-        with sftp.open('/shares/Public/webplayer/style.css', 'wb') as f:
+        with sftp.open('/shares/webplayer/style.css', 'wb') as f:
             f.write(get_file_content('style.css', STYLE_CSS))
             
         print("[9] Writing app.js...")
-        with sftp.open('/shares/Public/webplayer/app.js', 'wb') as f:
+        with sftp.open('/shares/webplayer/app.js', 'wb') as f:
             f.write(get_file_content('app.js', APP_JS))
             
         print("[10] Setting permissions for Windows Explorer editability...")
         nas_owner = os.environ.get('NAS_OWNER', 'root')
         nas_group = os.environ.get('NAS_GROUP', 'share')
-        _, stdout, _ = client.exec_command(f'chmod -R 777 /shares/Public/webplayer; chown -R {nas_owner}:{nas_group} /shares/Public/webplayer')
+        _, stdout, _ = client.exec_command(f'chmod -R 777 /shares/webplayer; chown -R {nas_owner}:{nas_group} /shares/webplayer')
         stdout.read()
         
         print("[11] Restarting Apache...")
