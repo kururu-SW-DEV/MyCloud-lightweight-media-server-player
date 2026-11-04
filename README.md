@@ -19,6 +19,7 @@ WD My Cloud Gen 1 (ARMv7 650MHz, 226MB RAM, 5400RPM HDD) 전용으로 설계된 
 ├── deploy_webplayer.py         # NAS 원클릭 스마트 배포 스크립트 (webplayer/, apache/ 우선 반영)
 ├── ssh_client.py               # NAS SSH 자동 접속 클라이언트
 ├── requirements.txt            # 파이썬 의존성 패키지 (paramiko==3.5.1 고정 - 아래 참고)
+├── DEVELOPMENT_LOG.md          # 상세 개발 및 보안 감사 로그
 └── test_and_tools/             # 실서버 검증, 벤치마크 및 진단 스크립트 모음 (125개 도구)
 ```
 
