@@ -378,9 +378,9 @@ def stream_subtitles_cues(video_path, stream_id):
     # a 0xB3/0xB7 byte inside an offset integer and never fail when a CuePoint
     # has many CueTrackPositions (> 30 bytes away from CueTime).
     if target_track_num < 128:
-        track_sig = b'\xf7\x81' + chr(target_track_num)
+        track_sig = b'\xf7\x81' + struct.pack('>B', target_track_num)
     else:
-        track_sig = b'\xf7\x82' + chr(target_track_num >> 8) + chr(target_track_num & 0xFF)
+        track_sig = b'\xf7\x82' + struct.pack('>H', target_track_num)
         
     cues = []
     cp = 0
