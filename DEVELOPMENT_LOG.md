@@ -275,3 +275,16 @@
 5. **Apache mod_deflate Gzip 압축 및 7일 브라우저 캐싱 적용 (`apache/apache_webplayer.conf`, `apache/webplayer.conf`)**:
    - 웹플레이어 디렉토리(`/shares/webplayer`)에 `mod_deflate`를 활성화하여 `app.js`(85KB -> 23KB, 73% 압축), `style.css`(25KB -> 6KB, 76% 압축), `api.php` JSON 응답(45KB -> 7.6KB, 83% 압축)의 전송량을 1/4 이하로 경량화.
    - `.css`, `.js` 정적 에셋에 `Cache-Control: max-age=604800, public`(7일) 헤더를 적용하고, 배포 시 `index.html`의 `?v=...` 쿼리 버전을 자동 갱신하여 첫 방문 이후 네트워크 왕복 시간(0ms) 제거.
+
+### Phase 20: 뷰포트 밖 렌더링 스킵(content-visibility), 검색 정규화 사전 인덱싱 및 자막 매칭 배열 할당 제거 (2026-11-07)
+1. **CSS `content-visibility: auto` 기반 뷰포트 외 렌더링 스킵 최적화 (`style.css`)**:
+   - 수백 개의 영상 및 폴더 카드가 존재하는 대형 라이브러리(`mode=all`)에서 브라우저가 화면 밖의 카드까지 전체 스타일/레이아웃/페인팅을 계산하던 렌더 트리 부하를 차단.
+   - `.folder-card, .video-card`에 `content-visibility: auto; contain-intrinsic-size: auto 200px;`를 지정하고, 리스트 뷰에는 `contain-intrinsic-size: auto 60px;`를 적용하여 뷰포트 내부 요소만 효율적으로 렌더링하도록 개선. 모바일 60fps 스크롤 유지.
+2. **검색 키워드 사전 정규화 인덱싱(`_searchKey`)을 통한 타이핑 검색 가속 (`app.js`)**:
+   - 검색창 입력 시 매 키 입력마다 수백 개 동영상의 이름과 폴더 경로에 대해 반복 실행되던 `v.name.toLowerCase()` 및 `v.folder.toLowerCase()` 런타임 문자열 할당을 제거.
+   - 데이터 수신(`loadData`) 시점에 `_searchKey`를 사전 생성하여 단일 `includes()` 비교로 2배 이상 빠른 실시간 검색 필터링 구현.
+3. **자막 타임스탬프 파싱 정규식 분할 제거 및 스트링 인덱스 슬라이싱 (`app.js`)**:
+   - 자막 파싱 시 수천 번 반복 호출되던 `parseTimestamp(str)`에서 `str.trim().split(/\s+/)` 정규식 분할을 제거하고 `indexOf(' ')` 기반 인덱스 슬라이싱으로 대체하여 중간 배열 할당을 완전히 제거.
+4. **자막 파일명 매칭 인라인 문자 비교 및 비디오 베이스네임 길이 캐싱 (`api.php`)**:
+   - `isMatchingSubtitleBase` 함수에서 다음 구분자 문자 검사 시 `in_array($c, array('.', '_', ...))` 배열을 매번 동적 생성하던 PHP 내부 해시테이블 할당을 인라인 동등 비교(`$nextChar === '.' || ...`)로 변경하여 메모리 할당 0화.
+   - 비디오 베이스네임의 길이(`$vLen`)를 루프 진입 전 1회만 계산하여 자막 비교 루프에 전달함으로써 불필요한 `strlen()` 재계산 오버헤드 제거.

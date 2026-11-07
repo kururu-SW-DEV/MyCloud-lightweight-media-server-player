@@ -290,8 +290,8 @@ function getActivePlaylist() {
     const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
     if (query && activeVideo) {
         const filtered = sorted.filter(v => currentMode === 'all'
-            ? (v.name.toLowerCase().includes(query) || (v.folder && v.folder.toLowerCase().includes(query)))
-            : v.name.toLowerCase().includes(query)
+            ? (v._searchKey || v.name.toLowerCase()).includes(query)
+            : ((v._searchKey || v.name.toLowerCase()).includes(query))
         );
         if (filtered.some(v => v.rel_path === activeVideo.rel_path)) {
             return filtered;
@@ -768,7 +768,15 @@ async function loadData(dir = currentDir, mode = currentMode) {
         }
         
         currentVideos = data.videos || [];
+        for (let i = 0; i < currentVideos.length; i++) {
+            const v = currentVideos[i];
+            v._searchKey = ((v.name || '') + ' ' + (v.folder || '')).toLowerCase();
+        }
         currentDirs = data.dirs || [];
+        for (let i = 0; i < currentDirs.length; i++) {
+            const d = currentDirs[i];
+            d._searchKey = (d.name || '').toLowerCase();
+        }
         currentParentDir = data.parent_dir !== undefined ? data.parent_dir : null;
         // OPT-2: Invalidate sort caches — data has changed
         _sortedVideosCache = null;
@@ -897,14 +905,12 @@ function applySortAndRender() {
     
     if (query) {
         if (currentMode === 'all') {
-            targetVideos = targetVideos.filter(v => 
-                v.name.toLowerCase().includes(query) || (v.folder && v.folder.toLowerCase().includes(query))
-            );
+            targetVideos = targetVideos.filter(v => (v._searchKey || v.name.toLowerCase()).includes(query));
             renderGrid([], targetVideos);
             return;
         } else {
-            targetDirs = targetDirs.filter(d => d.name.toLowerCase().includes(query));
-            targetVideos = targetVideos.filter(v => v.name.toLowerCase().includes(query));
+            targetDirs = targetDirs.filter(d => (d._searchKey || d.name.toLowerCase()).includes(query));
+            targetVideos = targetVideos.filter(v => (v._searchKey || v.name.toLowerCase()).includes(query));
             
             if (targetDirs.length === 0 && targetVideos.length === 0) {
                 // Plain button + addEventListener (no inline onclick) - escapeHtml()
@@ -1523,15 +1529,24 @@ function decodeHtmlEntities(str) {
 function parseTimestamp(str) {
     if (!str) return 0;
     // Strip trailing WebVTT cue settings (e.g. "00:01:13.500 line:90% align:center")
-    const token = str.trim().split(/\s+/)[0].replace(',', '.');
-    const parts = token.split(':');
+    let s = str.trim();
+    const sp = s.indexOf(' ');
+    if (sp !== -1) s = s.substring(0, sp);
+    const tb = s.indexOf('\t');
+    if (tb !== -1) s = s.substring(0, tb);
+    if (s.indexOf(',') !== -1) s = s.replace(',', '.');
+    
+    const p1 = s.indexOf(':');
     let res = 0;
-    if (parts.length === 3) {
-        res = parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
-    } else if (parts.length === 2) {
-        res = parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+    if (p1 === -1) {
+        res = parseFloat(s);
     } else {
-        res = parseFloat(parts[0]);
+        const p2 = s.indexOf(':', p1 + 1);
+        if (p2 === -1) {
+            res = parseFloat(s.substring(0, p1)) * 60 + parseFloat(s.substring(p1 + 1));
+        } else {
+            res = parseFloat(s.substring(0, p1)) * 3600 + parseFloat(s.substring(p1 + 1, p2)) * 60 + parseFloat(s.substring(p2 + 1));
+        }
     }
     return (isFinite(res) && res >= 0) ? res : 0;
 }

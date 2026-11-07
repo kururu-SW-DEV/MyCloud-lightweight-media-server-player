@@ -400,6 +400,8 @@ body {
 
 .video-grid.list-view .folder-card,
 .video-grid.list-view .video-card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 60px;
     flex-direction: row;
     height: 60px;
     min-height: 60px;
@@ -516,6 +518,8 @@ body {
 
 /* Cards (Default Grid) */
 .folder-card, .video-card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
     background-color: var(--bg-card);
     border-radius: var(--radius);
     overflow: hidden;

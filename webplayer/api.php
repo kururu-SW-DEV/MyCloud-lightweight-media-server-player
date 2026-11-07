@@ -81,13 +81,14 @@ function makeWebUrl($relPath) {
 }
 
 // Helper: Match subtitle basename to video basename without false-positive prefix matches (e.g. EP1 vs EP10)
-function isMatchingSubtitleBase($subBase, $vidBase) {
-    if (strcasecmp($subBase, $vidBase) === 0) return true;
-    $vLen = strlen($vidBase);
-    if (strlen($subBase) <= $vLen) return false;
+function isMatchingSubtitleBase($subBase, $vidBase, $vLen = null) {
+    if ($vLen === null) $vLen = strlen($vidBase);
+    $sLen = strlen($subBase);
+    if ($sLen === $vLen) return strcasecmp($subBase, $vidBase) === 0;
+    if ($sLen < $vLen) return false;
     if (strncasecmp($subBase, $vidBase, $vLen) !== 0) return false;
     $nextChar = $subBase[$vLen];
-    return in_array($nextChar, array('.', '_', '-', ' ', '[', '('), true);
+    return ($nextChar === '.' || $nextChar === '_' || $nextChar === '-' || $nextChar === ' ' || $nextChar === '[' || $nextChar === '(');
 }
 
 // Helper: Format bytes - pure integer branch without log() / pow() (Item 9)
@@ -446,9 +447,10 @@ if ($mode === 'all') {
     foreach ($allVideos as &$video) {
         if (!isset($subsByFolder[$video['folder']])) continue;
         $vidBase = $video['basename'];
+        $vLen = strlen($vidBase);
         foreach ($subsByFolder[$video['folder']] as $sub) {
             $subBase = $sub['basename'];
-            if (isMatchingSubtitleBase($subBase, $vidBase)) {
+            if (isMatchingSubtitleBase($subBase, $vidBase, $vLen)) {
                 $video['subtitles'][] = $sub;
             }
         }
@@ -610,8 +612,9 @@ foreach ($rawVideos as $rv) {
     
     $matchedSubs = array();
     if ($hasSubs) {
+        $vLen = strlen($baseName);
         foreach ($subtitlesMap as $subItem => $subInfo) {
-            if (isMatchingSubtitleBase($subInfo['basename'], $baseName)) {
+            if (isMatchingSubtitleBase($subInfo['basename'], $baseName, $vLen)) {
                 $matchedSubs[] = $subInfo;
             }
         }
