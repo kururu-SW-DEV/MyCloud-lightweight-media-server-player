@@ -846,6 +846,7 @@ body.is-dragging {
     cursor: pointer;
     padding: 0;
     margin-left: 3px;
+    flex-shrink: 0;
     transition: all 0.15s ease;
 }
 
@@ -1073,17 +1074,44 @@ video::cue {
 /* Minimized (mini-player) mode - small corner window, video keeps playing */
 .modal-dialog.minimized {
     resize: none;
-    min-width: 260px;
+    min-width: 240px;
+    max-width: calc(100vw - 12px);
     min-height: 0;
+    height: auto !important;
     box-shadow: 0 15px 40px -8px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .modal-dialog.minimized .modal-header {
-    padding: 6px 10px;
+    padding: 6px 8px;
+    gap: 6px;
 }
 
 .modal-dialog.minimized .video-title-display {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
+    gap: 4px;
+}
+
+.modal-dialog.minimized .modal-header-actions {
+    gap: 4px;
+}
+
+.modal-dialog.minimized .modal-header-actions .btn-small {
+    padding: 4px 6px;
+    font-size: 0.72rem;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.modal-dialog.minimized .modal-header-actions .btn-small span:not(#video-speed-text) {
+    display: none;
+}
+
+.modal-dialog.minimized .btn-close {
+    width: 25px;
+    height: 25px;
+    font-size: 1.05rem;
+    margin-left: 1px;
+    flex-shrink: 0;
 }
 
 .modal-dialog.minimized .modal-footer,
@@ -1094,6 +1122,8 @@ video::cue {
 .modal-dialog.minimized .video-wrapper {
     min-height: 0;
     max-height: none;
+    height: auto;
+    aspect-ratio: 16 / 9;
 }
 
 .control-group {
@@ -1222,32 +1252,35 @@ video::cue {
         flex-shrink: 0;
     }
     .modal-dialog {
-        width: 98vw;
+        width: calc(100vw - 12px);
+        min-width: 0;
+        max-width: calc(100vw - 12px);
+        min-height: 0;
         max-height: 96vh;
+        max-height: 96dvh;
         border-radius: 10px;
+    }
+    .modal-header {
+        padding: 8px 10px;
+        gap: 8px;
     }
     .modal-header-actions {
         display: flex;
         align-items: center;
         gap: 4px;
-        overflow-x: auto;
-        scrollbar-width: none;
+        flex-shrink: 0;
         flex-wrap: nowrap;
     }
     .modal-header-actions .btn-small {
         flex-shrink: 0;
-        padding: 5px 8px;
+        padding: 5px 7px;
         font-size: 0.74rem;
     }
     .modal-footer {
-        overflow-x: auto;
-        scrollbar-width: none;
-        flex-wrap: nowrap;
-        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 6px 10px;
         padding: 8px 10px;
-    }
-    .modal-footer::-webkit-scrollbar {
-        display: none;
     }
     .control-group {
         flex-shrink: 0;
@@ -1258,12 +1291,54 @@ video::cue {
         font-size: 0.76rem;
     }
     .select-input {
-        max-width: 130px;
+        max-width: 140px;
+        min-width: 100px;
         font-size: 0.78rem;
     }
     .subtitle-box {
         font-size: 1.05rem;
         bottom: 40px;
+    }
+}
+
+@media (max-width: 480px) {
+    .modal-header-actions .btn-small span:not(#video-speed-text) {
+        display: none;
+    }
+    .modal-header-actions .btn-small {
+        padding: 5px 7px;
+    }
+    .btn-close {
+        width: 26px;
+        height: 26px;
+        font-size: 1.05rem;
+        margin-left: 1px;
+    }
+}
+
+@media (max-height: 480px) {
+    .modal-dialog {
+        min-height: 0;
+        max-height: 98vh;
+        max-height: 98dvh;
+    }
+    .modal-header {
+        padding: 5px 10px;
+    }
+    .video-wrapper {
+        min-height: 100px;
+        max-height: calc(98vh - 88px);
+        max-height: calc(98dvh - 88px);
+    }
+    .modal-footer {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding: 5px 10px;
+        gap: 8px;
+    }
+    .modal-footer::-webkit-scrollbar {
+        display: none;
     }
 }
 
@@ -1329,4 +1404,15 @@ video::cue {
 
 .btn-nav-switch svg {
     flex-shrink: 0;
+}
+
+.btn-nav-switch .nav-arrow {
+    margin-left: 1px;
+    opacity: 0.85;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-nav-switch:hover .nav-arrow {
+    opacity: 1;
+    transform: translateX(2px);
 }

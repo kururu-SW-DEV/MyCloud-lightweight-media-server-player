@@ -21,21 +21,27 @@ function validateRelativePath($path) {
     return true;
 }
 
-// 32-bit PHP integer overflow protection for large video files (> 2GB)
+// 32-bit PHP integer overflow protection for large video files
 function getSafeFileSize($fullPath) {
-    $size = @filesize($fullPath);
-    if ($size !== false && $size > 0 && $size <= 1073741824) {
-        return (string)$size;
+    $st = @stat($fullPath);
+    if ($st === false) {
+        $size = @filesize($fullPath);
+        if ($size !== false && $size > 0) {
+            return sprintf('%u', $size);
+        }
+        return '0';
     }
-    $cmd = 'timeout 3 stat -c "%s" -- ' . safeShellArg($fullPath) . ' 2>/dev/null';
-    $out = trim(@shell_exec($cmd));
-    if ($out !== '' && ctype_digit($out)) {
-        return $out;
+    $rawSize = $st['size'];
+    // In 32-bit PHP, sprintf('%u') accurately handles up to 4,294,967,295 bytes (4GB) with 0 shell forks.
+    // Only if allocated filesystem blocks exceed 4GB (st_blocks * 512 > 4GB), shell out to stat command.
+    if (isset($st['blocks']) && ($st['blocks'] * 512.0 > 4294967296.0)) {
+        $cmd = 'export LC_ALL=C.UTF-8 && timeout 3 stat -c "%s" -- ' . safeShellArg($fullPath) . ' 2>/dev/null';
+        $out = trim(@shell_exec($cmd));
+        if ($out !== '' && ctype_digit($out)) {
+            return $out;
+        }
     }
-    if ($size !== false && $size > 0) {
-        return sprintf("%.0f", (float)$size);
-    }
-    return '0';
+    return sprintf('%u', $rawSize);
 }
 
 function isWithinBaseDir($resolved, $base) {
@@ -48,7 +54,7 @@ if ($baseDir === false) {
     $baseDir = '/shares/Public';
 }
 
-$videoExts = array('mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'flv');
+$videoExts = array('mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'flv', 'wmv', 'ts');
 $subExts = array('smi', 'sami', 'srt', 'ass', 'ssa', 'vtt');
 $ignoreList = array('.', '..', 'webplayer', 'incomplete', 'lost+found', '.DS_Store', 'Thumbs.db', 'desktop.ini', '.thumb');
 
@@ -57,6 +63,16 @@ function makeWebUrl($relPath) {
     $parts = explode('/', trim(str_replace('\\', '/', $relPath), '/'));
     $encoded = array_map('rawurlencode', $parts);
     return '/media/' . implode('/', $encoded);
+}
+
+// Helper: Match subtitle basename to video basename without false-positive prefix matches (e.g. EP1 vs EP10)
+function isMatchingSubtitleBase($subBase, $vidBase) {
+    if (strcasecmp($subBase, $vidBase) === 0) return true;
+    $vLen = strlen($vidBase);
+    if (strlen($subBase) <= $vLen) return false;
+    if (strncasecmp($subBase, $vidBase, $vLen) !== 0) return false;
+    $nextChar = $subBase[$vLen];
+    return in_array($nextChar, array('.', '_', '-', ' ', '[', '('), true);
 }
 
 // Helper: Format bytes - pure integer branch without log() / pow() (Item 9)
@@ -86,19 +102,33 @@ if (isset($_GET['action']) && $_GET['action'] === 'probe_subs') {
         exit;
     }
     
+    $tmpDir = '/tmp/webplayer_sub_ram';
+    if (is_link($tmpDir)) {
+        @unlink($tmpDir);
+    }
+    if (!is_dir($tmpDir)) {
+        @mkdir($tmpDir, 0777, true);
+    }
+    $probeCacheFile = $tmpDir . '/probe_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath)) . '.json';
+    if (file_exists($probeCacheFile) && filesize($probeCacheFile) > 0) {
+        readfile($probeCacheFile);
+        exit;
+    }
+
     // 1. High-speed zero-disk pure Python MKV probe (< 0.05s vs 2.5s avconv)
-    $fastCmd = 'python /shares/webplayer/stream_sub.py probe ' . safeShellArg($fullVideoPath) . ' 2>/dev/null';
+    $fastCmd = 'timeout 5 python /shares/webplayer/stream_sub.py probe ' . safeShellArg($fullVideoPath) . ' 2>/dev/null';
     $fastOut = @shell_exec($fastCmd);
     if (!empty($fastOut)) {
         $fastJson = @json_decode($fastOut, true);
-        if ($fastJson && isset($fastJson['success']) && $fastJson['success'] && !empty($fastJson['subtitles'])) {
+        if ($fastJson && isset($fastJson['success']) && $fastJson['success'] && isset($fastJson['subtitles'])) {
+            @file_put_contents($probeCacheFile, $fastOut);
             echo $fastOut;
             exit;
         }
     }
 
     // 2. Fallback to avconv probe for non-MKV or unusual streams
-    $cmd = 'export LANG=C.UTF-8 && export LC_ALL=C.UTF-8 && export LD_LIBRARY_PATH=/usr/local/wdmcserver/lib && /usr/local/wdmcserver/bin/avconv -probesize 65536 -analyzeduration 1000000 -i ' . safeShellArg($fullVideoPath) . ' 2>&1';
+    $cmd = 'export LANG=C.UTF-8 && export LC_ALL=C.UTF-8 && export LD_LIBRARY_PATH=/usr/local/wdmcserver/lib && timeout 8 /usr/local/wdmcserver/bin/avconv -probesize 65536 -analyzeduration 1000000 -i ' . safeShellArg($fullVideoPath) . ' 2>&1';
     $output = @shell_exec($cmd);
     
     $subs = array();
@@ -106,9 +136,14 @@ if (isset($_GET['action']) && $_GET['action'] === 'probe_subs') {
     foreach ($lines as $line) {
         if (preg_match('/Stream #0[.:](\d+)(?:\(([^)]+)\))?: Subtitle: ([^,\n\r]+)/i', $line, $m)) {
             $s_id = $m[1];
-            $lang = strtolower(trim($m[2]));
+            if (count($m) >= 4) {
+                $lang = strtolower(trim($m[2]));
+                $codec = strtolower(trim($m[3]));
+            } else {
+                $lang = 'und';
+                $codec = isset($m[2]) ? strtolower(trim($m[2])) : 'srt';
+            }
             if (empty($lang)) $lang = 'und';
-            $codec = strtolower(trim($m[3]));
             
             $langLabel = strtoupper($lang);
             if ($lang === 'kor' || $lang === 'ko' || $lang === 'korean') $langLabel = '한국어';
@@ -158,7 +193,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'probe_subs') {
         return 0;
     });
     
-    echo json_encode(array('success' => true, 'subtitles' => $subs), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $respJson = json_encode(array('success' => true, 'subtitles' => $subs), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    @file_put_contents($probeCacheFile, $respJson);
+    echo $respJson;
     exit;
 }
 
@@ -222,9 +259,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
         1 => array('pipe', 'w'),
         2 => array('file', '/dev/null', 'w')
     );
-    $procEnv = array('LANG' => 'C.UTF-8', 'LC_ALL' => 'C.UTF-8');
+    $sysPath = getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+    $sysLd = getenv('LD_LIBRARY_PATH') ?: '/usr/local/wdmcserver/lib';
+    $procEnv = array(
+        'LANG' => 'C.UTF-8',
+        'LC_ALL' => 'C.UTF-8',
+        'PATH' => $sysPath,
+        'LD_LIBRARY_PATH' => $sysLd
+    );
     $proc = @proc_open($cmd, $descriptors, $pipes, null, $procEnv);
     $cacheFp = @fopen($cacheFile . '.tmp', 'wb');
+    $timedOut = false;
     
     if (is_resource($proc)) {
         fclose($pipes[0]);
@@ -239,6 +284,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
             $buffer = fread($pipes[1], 8192);
             $meta = stream_get_meta_data($pipes[1]);
             if ($meta['timed_out']) {
+                $timedOut = true;
                 @proc_terminate($proc, 9);
                 break;
             }
@@ -262,10 +308,14 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
             exit;
         }
         
-        @proc_close($proc);
+        $exitCode = @proc_close($proc);
         if ($cacheFp) {
             fclose($cacheFp);
-            @rename($cacheFile . '.tmp', $cacheFile);
+            if (!$timedOut && !connection_aborted() && $exitCode === 0 && file_exists($cacheFile . '.tmp') && filesize($cacheFile . '.tmp') > 0) {
+                @rename($cacheFile . '.tmp', $cacheFile);
+            } else {
+                @unlink($cacheFile . '.tmp');
+            }
         }
     }
     
@@ -279,11 +329,19 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
             }
         }
     }
-    $ramFiles = @glob($tmpDir . '/*');
-    if ($ramFiles && count($ramFiles) > 15) {
-        usort($ramFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
-        while (count($ramFiles) > 10) {
-            $old = array_shift($ramFiles);
+    $ramSubFiles = @glob($tmpDir . '/*.{srt,vtt,ass,ssa}', GLOB_BRACE);
+    if ($ramSubFiles && count($ramSubFiles) > 15) {
+        usort($ramSubFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
+        while (count($ramSubFiles) > 10) {
+            $old = array_shift($ramSubFiles);
+            @unlink($old);
+        }
+    }
+    $ramProbeFiles = @glob($tmpDir . '/probe_*.json');
+    if ($ramProbeFiles && count($ramProbeFiles) > 80) {
+        usort($ramProbeFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
+        while (count($ramProbeFiles) > 60) {
+            $old = array_shift($ramProbeFiles);
             @unlink($old);
         }
     }
@@ -296,8 +354,10 @@ $mode = isset($_GET['all']) && $_GET['all'] == '1' ? 'all' : 'folder';
 if ($mode === 'all') {
     $allVideos = array();
     $allSubs = array();
+    $baseMtime = @filemtime($baseDir);
+    $maxMtime = ($baseMtime !== false) ? $baseMtime : 0;
     
-    $scanRecursive = function($dir, $depth = 0) use (&$scanRecursive, &$allVideos, &$allSubs, $baseDir, $videoExts, $subExts, $ignoreList) {
+    $scanRecursive = function($dir, $depth = 0) use (&$scanRecursive, &$allVideos, &$allSubs, &$maxMtime, $baseDir, $videoExts, $subExts, $ignoreList) {
         if ($depth > 8 || count($allVideos) >= 2500) return;
         $items = @scandir($dir);
         if ($items === false) return;
@@ -308,6 +368,8 @@ if ($mode === 'all') {
             
             if (is_link($fullPath)) continue;
             if (is_dir($fullPath)) {
+                $dm = @filemtime($fullPath);
+                if ($dm !== false && $dm > $maxMtime) $maxMtime = $dm;
                 $scanRecursive($fullPath, $depth + 1);
             } else if (is_file($fullPath)) {
                 $ext = strtolower(pathinfo($item, PATHINFO_EXTENSION));
@@ -320,6 +382,7 @@ if ($mode === 'all') {
                     $size = (float)$sizeStr;
                     if ($size <= 0) continue;
                     $mtime = @filemtime($fullPath);
+                    if ($mtime !== false && $mtime > $maxMtime) $maxMtime = $mtime;
                     $allVideos[] = array(
                         'name' => $item,
                         'basename' => $baseName,
@@ -334,6 +397,8 @@ if ($mode === 'all') {
                         'subtitles' => array()
                     );
                 } else if (in_array($ext, $subExts)) {
+                    $mtime = @filemtime($fullPath);
+                    if ($mtime !== false && $mtime > $maxMtime) $maxMtime = $mtime;
                     $allSubs[] = array(
                         'filename' => $item,
                         'basename' => $baseName,
@@ -362,7 +427,7 @@ if ($mode === 'all') {
         $vidBase = $video['basename'];
         foreach ($subsByFolder[$video['folder']] as $sub) {
             $subBase = $sub['basename'];
-            if ($subBase === $vidBase || strpos($subBase, $vidBase) === 0) {
+            if (isMatchingSubtitleBase($subBase, $vidBase)) {
                 $video['subtitles'][] = $sub;
             }
         }
@@ -373,9 +438,13 @@ if ($mode === 'all') {
         return strnatcasecmp($a['name'], $b['name']);
     });
     
-    $etag = '"' . md5($baseDir . ':' . @filemtime($baseDir) . ':' . count($allVideos)) . '"';
+    $etag = '"' . md5($baseDir . ':' . $maxMtime . ':' . count($allVideos) . ':' . count($allSubs)) . '"';
     header('ETag: ' . $etag);
-    if (isset($_SERVER['HTTP_IF_NONE_MATCH']) && trim($_SERVER['HTTP_IF_NONE_MATCH']) === $etag) {
+    $clientEtag = isset($_SERVER['HTTP_IF_NONE_MATCH']) ? trim($_SERVER['HTTP_IF_NONE_MATCH']) : '';
+    if (strpos($clientEtag, 'W/') === 0) {
+        $clientEtag = substr($clientEtag, 2);
+    }
+    if ($clientEtag === $etag) {
         header('HTTP/1.1 304 Not Modified');
         exit;
     }
@@ -426,11 +495,17 @@ if ($items === false) {
 $subtitlesMap = array();
 $allFiles = array();
 $rawDirs = array();
+$targetMtime = @filemtime($targetDir);
+$maxFolderMtime = ($targetMtime !== false) ? $targetMtime : 0;
 
 foreach ($items as $item) {
     if (in_array($item, $ignoreList) || $item[0] === '.') continue;
     $fullPath = $targetDir . '/' . $item;
     if (is_link($fullPath)) continue;
+    $itemMtime = @filemtime($fullPath);
+    if ($itemMtime !== false && $itemMtime > $maxFolderMtime) {
+        $maxFolderMtime = $itemMtime;
+    }
     
     if (is_dir($fullPath)) {
         $rawDirs[] = $item;
@@ -505,7 +580,7 @@ foreach ($allFiles as $item) {
     $matchedSubs = array();
     foreach ($subtitlesMap as $subItem => $subInfo) {
         $subBase = $subInfo['basename'];
-        if ($subBase === $baseName || strpos($subBase, $baseName) === 0) {
+        if (isMatchingSubtitleBase($subBase, $baseName)) {
             $matchedSubs[] = $subInfo;
         }
     }
@@ -536,9 +611,13 @@ usort($videos, function($a, $b) {
     return strnatcasecmp($a['name'], $b['name']);
 });
 
-$etag = '"' . md5($targetDir . ':' . @filemtime($targetDir) . ':' . count($items)) . '"';
+$etag = '"' . md5($targetDir . ':' . $maxFolderMtime . ':' . count($items)) . '"';
 header('ETag: ' . $etag);
-if (isset($_SERVER['HTTP_IF_NONE_MATCH']) && trim($_SERVER['HTTP_IF_NONE_MATCH']) === $etag) {
+$clientEtag = isset($_SERVER['HTTP_IF_NONE_MATCH']) ? trim($_SERVER['HTTP_IF_NONE_MATCH']) : '';
+if (strpos($clientEtag, 'W/') === 0) {
+    $clientEtag = substr($clientEtag, 2);
+}
+if ($clientEtag === $etag) {
     header('HTTP/1.1 304 Not Modified');
     exit;
 }

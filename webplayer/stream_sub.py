@@ -19,6 +19,10 @@ try:
 except Exception:
     pass
 
+_orig_ord = ord
+def ord(x):
+    return x if isinstance(x, int) else _orig_ord(x)
+
 def read_vint(data, pos):
     if pos >= len(data): return None, 0
     b0 = ord(data[pos])
@@ -51,6 +55,14 @@ def ms_to_srt(ms):
     s = (ms % 60000) // 1000
     millis = ms % 1000
     return "%02d:%02d:%02d,%03d" % (h, m, s, millis)
+
+def ms_to_ass(ms):
+    if ms < 0: ms = 0
+    h, rem = divmod(ms, 3600000)
+    m, rem = divmod(rem, 60000)
+    s, ms_part = divmod(rem, 1000)
+    cs = ms_part // 10
+    return "%d:%02d:%02d.%02d" % (h, m, s, cs)
 
 def get_language_label(lang):
     lang = lang.lower().strip()
@@ -88,7 +100,10 @@ def parse_mkv_seekhead(f):
     seg_data_start = seg_idx + 4 + sl
     
     sh_idx = hdr.find(b'\x11\x4d\x9b\x74')
-    if sh_idx == -1: return seg_data_start, None, None
+    if sh_idx == -1:
+        tr_idx = hdr.find(b'\x16\x54\xae\x6b', seg_data_start)
+        tracks_off = (tr_idx - seg_data_start) if tr_idx != -1 else None
+        return seg_data_start, tracks_off, None
     
     sh_sz, sh_len = read_vint(hdr, sh_idx + 4)
     if sh_sz is None: return seg_data_start, None, None
@@ -126,6 +141,11 @@ def parse_mkv_seekhead(f):
             elif sid == b'\x1c\x53\xbb\x6b':
                 cues_offset = spos
         p += 1
+
+    if tracks_offset is None:
+        tr_idx = hdr.find(b'\x16\x54\xae\x6b', seg_data_start)
+        if tr_idx != -1:
+            tracks_offset = tr_idx - seg_data_start
         
     return seg_data_start, tracks_offset, cues_offset
 
@@ -133,7 +153,7 @@ def probe_subtitles(video_path):
     try:
         f = open(video_path, 'rb')
     except Exception as e:
-        print json.dumps({'success': False, 'error': str(e)})
+        print(json.dumps({'success': False, 'error': str(e)}))
         return
         
     seg_data_start, tracks_offset, cues_offset = parse_mkv_seekhead(f)
@@ -168,7 +188,7 @@ def probe_subtitles(video_path):
             tcodec = None
             tlang = 'und'
             tname = ''
-            tdef = 1
+            tdef = 0
             tforced = 0
             
             while ep < entry_end:
@@ -232,7 +252,7 @@ def probe_subtitles(video_path):
         return (is_kor, is_forced, s['stream_id'])
         
     subs.sort(key=sub_sort_key)
-    print json.dumps({'success': True, 'subtitles': subs})
+    print(json.dumps({'success': True, 'subtitles': subs}))
 
 def fallback_avconv_probe(video_path):
     env = os.environ.copy()
@@ -242,7 +262,7 @@ def fallback_avconv_probe(video_path):
         p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         _, stderr_data = p.communicate()
     except Exception as e:
-        print json.dumps({'success': False, 'error': str(e)})
+        print(json.dumps({'success': False, 'error': str(e)}))
         return
         
     subs = []
@@ -271,7 +291,7 @@ def fallback_avconv_probe(video_path):
                     'is_forced': is_forced,
                     'embedded': True
                 })
-    print json.dumps({'success': True, 'subtitles': subs})
+    print(json.dumps({'success': True, 'subtitles': subs}))
 
 def stream_subtitles_cues(video_path, stream_id):
     try:
@@ -332,7 +352,7 @@ def stream_subtitles_cues(video_path, stream_id):
                     tpriv = tracks_data[vpos : vpos + isz]
                 ep = vpos + isz
             is_sub = (ttype == 17) or (tcodec and 'S_' in tcodec)
-            if is_sub and (cur_stream == target_stream_idx or tnum == target_stream_idx):
+            if is_sub and cur_stream == target_stream_idx:
                 target_track_num = tnum
                 target_codec = tcodec
                 codec_private = tpriv
@@ -353,73 +373,92 @@ def stream_subtitles_cues(video_path, stream_id):
     f.seek(seg_data_start + cues_offset + cl + csl)
     cues_data = f.read(csz)
     
-    # Fast search for target track
-    # In EBML, TrackNumber in CueTrack (0xF7) is a vint
+    # Fast search for target track using top-level CuePoint (0xBB) boundaries
+    # combined with cues_data.find(track_sig) skip-ahead so we never misidentify
+    # a 0xB3/0xB7 byte inside an offset integer and never fail when a CuePoint
+    # has many CueTrackPositions (> 30 bytes away from CueTime).
     if target_track_num < 128:
         track_sig = b'\xf7\x81' + chr(target_track_num)
     else:
         track_sig = b'\xf7\x82' + chr(target_track_num >> 8) + chr(target_track_num & 0xFF)
         
     cues = []
-    pos = 0
-    while True:
-        idx = cues_data.find(track_sig, pos)
-        if idx == -1: break
-        pos = idx + len(track_sig)
-        
-        b7_idx = cues_data.rfind(b'\xb7', max(0, idx - 10), idx)
-        if b7_idx == -1: continue
-        
-        b0 = ord(cues_data[b7_idx+1])
-        b7_len = 1
-        for l in range(1, 9):
-            if b0 & (0x80 >> (l - 1)):
-                b7_len = l
+    cp = 0
+    cues_len = len(cues_data)
+    next_sig_idx = cues_data.find(track_sig, 0)
+    while cp < cues_len and next_sig_idx != -1:
+        cp_id, cp_id_len = read_id(cues_data, cp)
+        if cp_id is None:
+            break
+        cp_sz, cp_sz_len = read_vint(cues_data, cp + cp_id_len)
+        if cp_sz is None:
+            break
+        cp_body = cp + cp_id_len + cp_sz_len
+        cp_end = cp_body + cp_sz
+        if cp_id != 0xBB or cp_end <= next_sig_idx:
+            cp = cp_end
+            continue
+        # This CuePoint (0xBB) contains track_sig; parse its children cleanly
+        ctime = 0
+        matched_positions = []
+        ip = cp_body
+        while ip < cp_end:
+            chid, chid_len = read_id(cues_data, ip)
+            if chid is None:
                 break
-        b7_sz = b0 & ((1 << (8 - b7_len)) - 1)
-        for i in range(1, b7_len): b7_sz = (b7_sz << 8) | ord(cues_data[b7_idx+1+i])
-        
-        _, el = read_id(cues_data, b7_idx)
-        esz, esl = read_vint(cues_data, b7_idx + el)
-        if esz is None: continue
-        
-        tp = b7_idx + el + esl
-        tp_end = tp + esz
-        cpos = None
-        rpos = 0
-        dur = 0
-        
-        while tp < tp_end:
-            tag_id, id_len = read_id(cues_data, tp)
-            if tag_id is None: break
-            tag_sz, sz_len = read_vint(cues_data, tp + id_len)
-            if tag_sz is None: break
-            vpos = tp + id_len + sz_len
-            if tag_id == 0xF1: # CueClusterPosition
+            chsz, chsz_len = read_vint(cues_data, ip + chid_len)
+            if chsz is None:
+                break
+            ch_body = ip + chid_len + chsz_len
+            ch_end = ch_body + chsz
+            if chid == 0xB3: # CueTime
                 v = 0
-                for i in range(tag_sz): v = (v << 8) | ord(cues_data[vpos + i])
-                cpos = v
-            elif tag_id == 0xF0: # CueRelativePosition
-                v = 0
-                for i in range(tag_sz): v = (v << 8) | ord(cues_data[vpos + i])
-                rpos = v
-            elif tag_id == 0xB2: # CueDuration
-                v = 0
-                for i in range(tag_sz): v = (v << 8) | ord(cues_data[vpos + i])
-                dur = v
-            tp = vpos + tag_sz
-                
-        if cpos is not None:
-            t_idx = cues_data.rfind(b'\xb3', max(0, b7_idx - 30), b7_idx)
-            ctime = 0
-            if t_idx != -1:
-                _, tl = read_id(cues_data, t_idx)
-                tsz, tsl = read_vint(cues_data, t_idx + tl)
-                if tsz is not None:
-                    v = 0
-                    for i in range(tsz): v = (v << 8) | ord(cues_data[t_idx + tl + tsl + i])
-                    ctime = v
+                for i in range(chsz):
+                    v = (v << 8) | ord(cues_data[ch_body + i])
+                ctime = v
+            elif chid == 0xB7: # CueTrackPositions
+                tp = ch_body
+                t_track = None
+                cpos = None
+                rpos = 0
+                dur = 0
+                while tp < ch_end:
+                    tag_id, id_len = read_id(cues_data, tp)
+                    if tag_id is None:
+                        break
+                    tag_sz, sz_len = read_vint(cues_data, tp + id_len)
+                    if tag_sz is None:
+                        break
+                    vpos = tp + id_len + sz_len
+                    if tag_id == 0xF7: # CueTrack
+                        v = 0
+                        for i in range(tag_sz):
+                            v = (v << 8) | ord(cues_data[vpos + i])
+                        t_track = v
+                    elif tag_id == 0xF1: # CueClusterPosition
+                        v = 0
+                        for i in range(tag_sz):
+                            v = (v << 8) | ord(cues_data[vpos + i])
+                        cpos = v
+                    elif tag_id == 0xF0: # CueRelativePosition
+                        v = 0
+                        for i in range(tag_sz):
+                            v = (v << 8) | ord(cues_data[vpos + i])
+                        rpos = v
+                    elif tag_id == 0xB2: # CueDuration
+                        v = 0
+                        for i in range(tag_sz):
+                            v = (v << 8) | ord(cues_data[vpos + i])
+                        dur = v
+                    tp = vpos + tag_sz
+                if t_track == target_track_num and cpos is not None:
+                    matched_positions.append((cpos, rpos, dur))
+            ip = ch_end
+        for cpos, rpos, dur in matched_positions:
             cues.append((ctime, dur, cpos, rpos))
+        cp = cp_end
+        if cp > next_sig_idx:
+            next_sig_idx = cues_data.find(track_sig, cp)
             
     if not cues:
         f.close()
@@ -456,10 +495,10 @@ def stream_subtitles_cues(video_path, stream_id):
             
         if rpos > 0:
             f.seek(cluster_data_start + rpos)
+            block_hdr = f.read(1024)
         else:
             f.seek(cluster_data_start)
-            
-        block_hdr = f.read(4096)
+            block_hdr = f.read(4096)
         txt = None
         b_dur = dur
         
@@ -535,12 +574,6 @@ def stream_subtitles_cues(video_path, stream_id):
                         mv = parts[6]
                         effect = parts[7]
                         text = parts[8]
-                        def ms_to_ass(ms):
-                            h, rem = divmod(ms, 3600000)
-                            m, rem = divmod(rem, 60000)
-                            s, ms_part = divmod(rem, 1000)
-                            cs = ms_part // 10
-                            return "%d:%02d:%02d.%02d" % (h, m, s, cs)
                         line = "Dialogue: %s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n" % (
                             layer, ms_to_ass(start_ms), ms_to_ass(end_ms), style, name, ml, mr, mv, effect, text.strip()
                         )
@@ -551,11 +584,16 @@ def stream_subtitles_cues(video_path, stream_id):
                 else:
                     out = "%d\n%s --> %s\n%s\n\n" % (cue_idx, ms_to_srt(start_ms), ms_to_srt(end_ms), txt.strip())
                     sys.stdout.write(out)
-                sys.stdout.flush()
+                if cue_idx == 1 or (cue_idx % 40) == 0:
+                    sys.stdout.flush()
                 cue_idx += 1
             except IOError:
                 break
                 
+    try:
+        sys.stdout.flush()
+    except IOError:
+        pass
     f.close()
 
 def fallback_avconv_stream(video_path, stream_id):

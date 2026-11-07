@@ -14,11 +14,33 @@ const PLAYER_SVG = {
     subBgOff: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect></svg>`
 };
 
+// Safe LocalStorage helpers for private browsing & iframe security
+function safeGetItem(key, fallback = null) {
+    try {
+        const val = localStorage.getItem(key);
+        return val !== null ? val : fallback;
+    } catch (e) {
+        return fallback;
+    }
+}
+
+function safeSetItem(key, val) {
+    try {
+        localStorage.setItem(key, String(val));
+    } catch (e) {}
+}
+
+function safeRemoveItem(key) {
+    try {
+        localStorage.removeItem(key);
+    } catch (e) {}
+}
+
 // MyCloud Web Media Player Client App
 
 let currentMode = 'folder'; // 'folder' or 'all'
-let currentSort = localStorage.getItem('mycloud_sort_mode') || 'name_asc';
-let currentLayout = localStorage.getItem('mycloud_layout_v2') || 'list'; // 'list' or 'grid' (default: list)
+let currentSort = safeGetItem('mycloud_sort_mode', 'name_asc');
+let currentLayout = safeGetItem('mycloud_layout_v2', 'list'); // 'list' or 'grid' (default: list)
 let currentDir = '';
 let currentParentDir = null;
 let currentDirs = [];
@@ -27,8 +49,8 @@ let activeVideo = null;
 
 let parsedSubtitles = []; // array of { start: seconds, end: seconds, text: string, isTop: boolean }
 let subtitleOffset = 0; // in seconds
-let subScale = 1.0;
-let subBgEnabled = localStorage.getItem('mycloud_sub_bg') !== 'false';
+let subScale = parseFloat(safeGetItem('mycloud_sub_scale', '1.0')) || 1.0;
+let subBgEnabled = safeGetItem('mycloud_sub_bg', 'true') !== 'false';
 let currentAvailableTracks = [];
 let userManuallySelectedSubtitle = false;
 let currentCueIndex = -1;
@@ -86,13 +108,20 @@ let hasCustomPosition = false;
 let isMinimized = false;
 let preMinimizeGeometry = null; // { left, top, width, height } to restore to
 
+function getModalViewportMargin() {
+    return window.innerWidth <= 640 ? 6 : 10;
+}
+
 function centerModalDialog() {
     if (!modalDialog) return;
     modalDialog.style.margin = '0';
-    const dialogWidth = modalDialog.offsetWidth || Math.min(window.innerWidth * 0.94, 1050);
-    const dialogHeight = modalDialog.offsetHeight || Math.min(window.innerHeight * 0.88, 620);
-    const left = Math.max(10, Math.round((window.innerWidth - dialogWidth) / 2));
-    const top = Math.max(10, Math.round((window.innerHeight - dialogHeight) / 2));
+    const margin = getModalViewportMargin();
+    const dialogWidth = modalDialog.offsetWidth || Math.min(window.innerWidth - margin * 2, 1050);
+    const dialogHeight = modalDialog.offsetHeight || Math.min(window.innerHeight - margin * 2, 620);
+    const maxLeft = Math.max(margin, window.innerWidth - dialogWidth - margin);
+    const maxTop = Math.max(margin, window.innerHeight - dialogHeight - margin);
+    const left = Math.max(margin, Math.min(maxLeft, Math.round((window.innerWidth - dialogWidth) / 2)));
+    const top = Math.max(margin, Math.min(maxTop, Math.round((window.innerHeight - dialogHeight) / 2)));
     
     modalDialog.style.left = `${left}px`;
     modalDialog.style.top = `${top}px`;
@@ -136,10 +165,11 @@ if (modalHeader && modalDialog) {
         
         const dialogWidth = modalDialog.offsetWidth;
         const dialogHeight = modalDialog.offsetHeight;
-        const minLeft = 10;
-        const maxLeft = Math.max(10, window.innerWidth - dialogWidth - 10);
-        const minTop = 10;
-        const maxTop = Math.max(10, window.innerHeight - dialogHeight - 10);
+        const margin = getModalViewportMargin();
+        const minLeft = margin;
+        const maxLeft = Math.max(margin, window.innerWidth - dialogWidth - margin);
+        const minTop = margin;
+        const maxTop = Math.max(margin, window.innerHeight - dialogHeight - margin);
         
         newLeft = Math.max(minLeft, Math.min(maxLeft, newLeft));
         newTop = Math.max(minTop, Math.min(maxTop, newTop));
@@ -174,10 +204,22 @@ let resizeStartY = 0;
 let startDialogWidth = 0;
 let startDialogHeight = 0;
 
-const savedPlayerWidth = localStorage.getItem('mycloud_player_width');
-const savedPlayerHeight = localStorage.getItem('mycloud_player_height');
-if (savedPlayerWidth && modalDialog) modalDialog.style.width = savedPlayerWidth;
-if (savedPlayerHeight && modalDialog) modalDialog.style.height = savedPlayerHeight;
+const savedPlayerWidth = safeGetItem('mycloud_player_width');
+const savedPlayerHeight = safeGetItem('mycloud_player_height');
+if (window.innerWidth > 640 && modalDialog) {
+    if (savedPlayerWidth) {
+        const parsedW = parseFloat(savedPlayerWidth);
+        if (isFinite(parsedW) && parsedW >= 320) {
+            modalDialog.style.width = `${Math.min(parsedW, window.innerWidth - 20)}px`;
+        }
+    }
+    if (savedPlayerHeight) {
+        const parsedH = parseFloat(savedPlayerHeight);
+        if (isFinite(parsedH) && parsedH >= 220) {
+            modalDialog.style.height = `${Math.min(parsedH, window.innerHeight - 20)}px`;
+        }
+    }
+}
 
 if (resizeHandle && modalDialog) {
     resizeHandle.addEventListener('pointerdown', (e) => {
@@ -198,10 +240,11 @@ if (resizeHandle && modalDialog) {
         const dx = e.clientX - resizeStartX;
         const dy = e.clientY - resizeStartY;
         
-        const minW = Math.min(380, window.innerWidth - 20);
-        const maxW = window.innerWidth - 20;
-        const minH = 240;
-        const maxH = window.innerHeight - 20;
+        const margin = getModalViewportMargin();
+        const minW = Math.min(window.innerWidth <= 640 ? 280 : 380, window.innerWidth - margin * 2);
+        const maxW = window.innerWidth - margin * 2;
+        const minH = Math.min(220, window.innerHeight - margin * 2);
+        const maxH = window.innerHeight - margin * 2;
         
         const newW = Math.round(Math.max(minW, Math.min(maxW, startDialogWidth + dx)));
         const newH = Math.round(Math.max(minH, Math.min(maxH, startDialogHeight + dy)));
@@ -220,8 +263,8 @@ if (resizeHandle && modalDialog) {
         // Persist final size once drag ends (not on every pointermove)
         const fw = modalDialog.style.width;
         const fh = modalDialog.style.height;
-        if (fw) localStorage.setItem('mycloud_player_width', fw);
-        if (fh) localStorage.setItem('mycloud_player_height', fh);
+        if (fw) safeSetItem('mycloud_player_width', fw);
+        if (fh) safeSetItem('mycloud_player_height', fh);
     };
 
     resizeHandle.addEventListener('pointerup', endResize);
@@ -232,8 +275,8 @@ if (resizeHandle && modalDialog) {
         e.stopPropagation();
         modalDialog.style.width = '';
         modalDialog.style.height = '';
-        localStorage.removeItem('mycloud_player_width');
-        localStorage.removeItem('mycloud_player_height');
+        safeRemoveItem('mycloud_player_width');
+        safeRemoveItem('mycloud_player_height');
         centerModalDialog();
         showToast('창 크기가 기본값으로 초기화되었습니다.');
     });
@@ -242,16 +285,31 @@ if (resizeHandle && modalDialog) {
 // -------------------------------------------------------------
 // Auto Next Video & Playlist Navigation
 // -------------------------------------------------------------
+function getActivePlaylist() {
+    const sorted = getSortedVideos(currentVideos, currentSort) || [];
+    const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    if (query && activeVideo) {
+        const filtered = sorted.filter(v => currentMode === 'all'
+            ? (v.name.toLowerCase().includes(query) || (v.folder && v.folder.toLowerCase().includes(query)))
+            : v.name.toLowerCase().includes(query)
+        );
+        if (filtered.some(v => v.rel_path === activeVideo.rel_path)) {
+            return filtered;
+        }
+    }
+    return sorted;
+}
+
 function playNextVideo() {
-    const sortedVideos = getSortedVideos(currentVideos, currentSort);
-    if (!sortedVideos || sortedVideos.length === 0 || !activeVideo) return;
+    const playlist = getActivePlaylist();
+    if (!playlist || playlist.length === 0 || !activeVideo) return;
     
-    const currentIndex = sortedVideos.findIndex(v => v.rel_path === activeVideo.rel_path);
+    const currentIndex = playlist.findIndex(v => v.rel_path === activeVideo.rel_path);
     if (currentIndex === -1) return;
     
     const nextIndex = currentIndex + 1;
-    if (nextIndex < sortedVideos.length) {
-        const nextVideo = sortedVideos[nextIndex];
+    if (nextIndex < playlist.length) {
+        const nextVideo = playlist[nextIndex];
         showToast(`다음 영상 자동 재생: ${nextVideo.name}`);
         openPlayer(encodeURIComponent(nextVideo.rel_path));
     } else {
@@ -260,15 +318,15 @@ function playNextVideo() {
 }
 
 function playPrevVideo() {
-    const sortedVideos = getSortedVideos(currentVideos, currentSort);
-    if (!sortedVideos || sortedVideos.length === 0 || !activeVideo) return;
+    const playlist = getActivePlaylist();
+    if (!playlist || playlist.length === 0 || !activeVideo) return;
     
-    const currentIndex = sortedVideos.findIndex(v => v.rel_path === activeVideo.rel_path);
+    const currentIndex = playlist.findIndex(v => v.rel_path === activeVideo.rel_path);
     if (currentIndex === -1) return;
     
     const prevIndex = currentIndex - 1;
     if (prevIndex >= 0) {
-        const prevVideo = sortedVideos[prevIndex];
+        const prevVideo = playlist[prevIndex];
         showToast(`이전 영상 재생: ${prevVideo.name}`);
         openPlayer(encodeURIComponent(prevVideo.rel_path));
     } else {
@@ -343,36 +401,61 @@ function enterMinimize() {
     preMinimizeGeometry = {
         left: rect.left,
         top: rect.top,
-        width: modalDialog.style.width || `${rect.width}px`,
-        height: modalDialog.style.height || `${rect.height}px`
+        styleWidth: modalDialog.style.width,
+        styleHeight: modalDialog.style.height,
+        hadCustomPosition: hasCustomPosition
     };
 
-    const mw = 340;
-    const left = Math.max(10, window.innerWidth - mw - 20);
-    const top = Math.max(10, window.innerHeight - 250);
+    const margin = getModalViewportMargin();
+    const mw = Math.min(340, window.innerWidth - margin * 2);
 
     modalDialog.classList.add('minimized');
     modalDialog.style.width = `${mw}px`;
     modalDialog.style.height = '';
-    modalDialog.style.left = `${left}px`;
-    modalDialog.style.top = `${top}px`;
     hasCustomPosition = true;
     isMinimized = true;
     updateMinimizeBtnUI();
+
+    const mh = modalDialog.offsetHeight || Math.round(mw * 9 / 16) + 36;
+    const left = Math.max(margin, window.innerWidth - mw - (window.innerWidth <= 640 ? margin : 16));
+    const top = Math.max(margin, window.innerHeight - mh - (window.innerWidth <= 640 ? margin : 16));
+    modalDialog.style.left = `${left}px`;
+    modalDialog.style.top = `${top}px`;
 }
 
 function restoreFromMinimize() {
     if (!modalDialog || !isMinimized) return;
     modalDialog.classList.remove('minimized');
-    if (preMinimizeGeometry) {
-        modalDialog.style.left = `${preMinimizeGeometry.left}px`;
-        modalDialog.style.top = `${preMinimizeGeometry.top}px`;
-        modalDialog.style.width = preMinimizeGeometry.width;
-        modalDialog.style.height = preMinimizeGeometry.height;
-    }
+    const geom = preMinimizeGeometry;
     preMinimizeGeometry = null;
     isMinimized = false;
     updateMinimizeBtnUI();
+
+    if (geom) {
+        if (window.innerWidth <= 640) {
+            modalDialog.style.width = '';
+            modalDialog.style.height = '';
+        } else {
+            modalDialog.style.width = geom.styleWidth || '';
+            modalDialog.style.height = geom.styleHeight || '';
+        }
+        if (geom.hadCustomPosition) {
+            const margin = getModalViewportMargin();
+            const dw = modalDialog.offsetWidth;
+            const dh = modalDialog.offsetHeight;
+            const maxLeft = Math.max(margin, window.innerWidth - dw - margin);
+            const maxTop = Math.max(margin, window.innerHeight - dh - margin);
+            modalDialog.style.left = `${Math.max(margin, Math.min(Math.round(geom.left), maxLeft))}px`;
+            modalDialog.style.top = `${Math.max(margin, Math.min(Math.round(geom.top), maxTop))}px`;
+            hasCustomPosition = true;
+        } else {
+            centerModalDialog();
+        }
+    } else {
+        modalDialog.style.width = '';
+        modalDialog.style.height = '';
+        centerModalDialog();
+    }
 }
 
 function toggleMinimize() {
@@ -385,11 +468,14 @@ function toggleMinimize() {
 // Subtitle Display Engine (Dual: High-Fidelity Overlay + Native TextTrack)
 // -------------------------------------------------------------
 function formatVttTime(sec) {
-    sec = Math.max(0, sec);
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = Math.floor(sec % 60);
-    const ms = Math.round((sec - Math.floor(sec)) * 1000);
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    const totalMs = Math.round(sec * 1000);
+    const ms = totalMs % 1000;
+    const totalSec = Math.floor(totalMs / 1000);
+    const s = totalSec % 60;
+    const totalMin = Math.floor(totalSec / 60);
+    const m = totalMin % 60;
+    const h = Math.floor(totalMin / 60);
     const pad = (n, len = 2) => String(n).padStart(len, '0');
     return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms, 3)}`;
 }
@@ -406,7 +492,9 @@ function buildVttText(cues) {
     const finiteEndCap = (videoPlayer && isFinite(videoPlayer.duration) && videoPlayer.duration > 0)
         ? videoPlayer.duration
         : 359999; // ~100 hours - safely past any real video, just needs to be finite
-    cues.forEach((c, i) => {
+    let cueIndex = 1;
+    cues.forEach((c) => {
+        if (!c || !c.text || !c.text.trim()) return;
         const start = Math.max(0, c.start + subtitleOffset);
         const rawEnd = c.end + subtitleOffset;
         const end = Math.max(start + 0.1, isFinite(rawEnd) ? rawEnd : finiteEndCap);
@@ -414,13 +502,16 @@ function buildVttText(cues) {
         // <b>, <c>) - escape them so literal characters in the dialogue text
         // can't be misread as cue markup.
         const text = c.text
+            .trim()
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
+        if (!text) return;
         const posLine = c.isTop
             ? 'line:8% position:50% align:center'
             : 'line:90% position:50% align:center';
-        vtt += `${i + 1}\n${formatVttTime(start)} --> ${formatVttTime(end)} ${posLine}\n${text}\n\n`;
+        vtt += `${cueIndex}\n${formatVttTime(start)} --> ${formatVttTime(end)} ${posLine}\n${text}\n\n`;
+        cueIndex++;
     });
     return vtt;
 }
@@ -442,6 +533,15 @@ function syncCuesToTextTrack() {
     if (!videoPlayer) return;
     const trackEl = document.getElementById('webplayer-native-track');
     if (!trackEl) return;
+
+    if (!trackEl._hasLoadSyncListener) {
+        trackEl.addEventListener('load', () => {
+            if (trackEl.track) {
+                trackEl.track.mode = isFullscreen() ? 'showing' : 'hidden';
+            }
+        });
+        trackEl._hasLoadSyncListener = true;
+    }
 
     if (currentVttBlobUrl) {
         URL.revokeObjectURL(currentVttBlobUrl);
@@ -548,7 +648,7 @@ function updateSubtitleDisplay() {
     // from index 0 - on a long episode with hundreds of cues, a naive scan
     // from the start does needless work on every single timeupdate tick once
     // playback is well past the beginning.
-    const SEARCH_WINDOW_SEC = 60; // widened from 30s as a safety margin for long-running cues (e.g. opening-theme lyric blocks) that aren't the special-cased open-ended last cue
+    const SEARCH_WINDOW_SEC = Math.max(60, (parsedSubtitles._maxFiniteDur || 60) + 5);
     let searchFloor = curTime - SEARCH_WINDOW_SEC;
     // parseSAMI leaves the very last cue of a file open (end: Infinity) so it
     // stays visible until the video ends - it can legitimately still be
@@ -614,6 +714,9 @@ if (videoPlayer) {
 // -------------------------------------------------------------
 // 1. Fetch and Load Directory Data
 // -------------------------------------------------------------
+let currentLoadDataAbortController = null;
+let currentLoadDataSeq = 0;
+
 async function loadData(dir = currentDir, mode = currentMode) {
     currentMode = mode;
     currentDir = dir;
@@ -623,6 +726,13 @@ async function loadData(dir = currentDir, mode = currentMode) {
         modeAllBtn.classList.toggle('active', currentMode === 'all');
     }
     
+    if (currentLoadDataAbortController) {
+        try { currentLoadDataAbortController.abort(); } catch (e) {}
+    }
+    currentLoadDataAbortController = new AbortController();
+    const signal = currentLoadDataAbortController.signal;
+    const reqSeq = ++currentLoadDataSeq;
+
     videoGrid.innerHTML = '<div class="loading-spinner">항목을 불러오는 중입니다...</div>';
     
     try {
@@ -633,8 +743,21 @@ async function loadData(dir = currentDir, mode = currentMode) {
             apiUrl += '?dir=' + encodeURIComponent(dir);
         }
         
-        const resp = await fetch(apiUrl);
-        const data = await resp.json();
+        const resp = await fetch(apiUrl, { signal });
+        if (reqSeq !== currentLoadDataSeq) return;
+        if (!resp.ok) {
+            videoGrid.innerHTML = `<div class="loading-spinner">서버 응답 오류 (HTTP ${resp.status})</div>`;
+            return;
+        }
+        let data;
+        try {
+            data = await resp.json();
+        } catch (e) {
+            if (reqSeq !== currentLoadDataSeq) return;
+            videoGrid.innerHTML = '<div class="loading-spinner">데이터 파싱 실패 (잘못된 응답 형식)</div>';
+            return;
+        }
+        if (reqSeq !== currentLoadDataSeq) return;
         
         if (!data.success) {
             // data.error is server-controlled and currently always a static
@@ -660,6 +783,8 @@ async function loadData(dir = currentDir, mode = currentMode) {
             clearSearchBtn.style.display = 'none';
         }
     } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        if (reqSeq !== currentLoadDataSeq) return;
         videoGrid.innerHTML = `<div class="loading-spinner">서버 연결 실패: ${escapeHtml(err.message)}</div>`;
     }
 }
@@ -810,14 +935,14 @@ if (sortSelect) {
     sortSelect.value = currentSort;
     sortSelect.addEventListener('change', () => {
         currentSort = sortSelect.value;
-        localStorage.setItem('mycloud_sort_mode', currentSort);
+        safeSetItem('mycloud_sort_mode', currentSort);
         applySortAndRender();
     });
 }
 
 function setLayoutMode(mode) {
     currentLayout = mode;
-    localStorage.setItem('mycloud_layout_v2', mode);
+    safeSetItem('mycloud_layout_v2', mode);
     if (layoutGridBtn && layoutListBtn) {
         layoutGridBtn.classList.toggle('active', mode === 'grid');
         layoutListBtn.classList.toggle('active', mode === 'list');
@@ -835,7 +960,7 @@ if (layoutListBtn) {
 }
 
 // File Date and Size Visibility Toggle (Default: Hidden)
-let showFileMeta = localStorage.getItem('mycloud_show_file_meta') === 'true'; // defaults to false (hidden)
+let showFileMeta = safeGetItem('mycloud_show_file_meta', 'false') === 'true'; // defaults to false (hidden)
 
 function applyMetaVisibility() {
     if (showFileMeta) {
@@ -855,7 +980,7 @@ applyMetaVisibility();
 if (metaHideBtn) {
     metaHideBtn.addEventListener('click', () => {
         showFileMeta = false;
-        localStorage.setItem('mycloud_show_file_meta', 'false');
+        safeSetItem('mycloud_show_file_meta', 'false');
         applyMetaVisibility();
         showToast('파일 날짜 및 용량을 숨겼습니다.');
     });
@@ -863,7 +988,7 @@ if (metaHideBtn) {
 if (metaShowBtn) {
     metaShowBtn.addEventListener('click', () => {
         showFileMeta = true;
-        localStorage.setItem('mycloud_show_file_meta', 'true');
+        safeSetItem('mycloud_show_file_meta', 'true');
         applyMetaVisibility();
         showToast('파일 날짜 및 용량을 표시합니다.');
     });
@@ -1005,6 +1130,7 @@ window.openPlayer = async function(encodedRelPath) {
     if (!video) return;
     
     activeVideo = video;
+    userManuallySelectedSubtitle = false;
     document.title = `${video.name} - MyCloud Media Player`;
     if (playerTitleText) {
         playerTitleText.textContent = video.name;
@@ -1035,6 +1161,10 @@ window.openPlayer = async function(encodedRelPath) {
     playerModal.classList.add('active');
     applySubtitleStyle();
     
+    if (!isMinimized && window.innerWidth <= 640 && modalDialog) {
+        modalDialog.style.width = '';
+        modalDialog.style.height = '';
+    }
     if (!hasCustomPosition) {
         centerModalDialog();
         requestAnimationFrame(() => centerModalDialog());
@@ -1043,43 +1173,60 @@ window.openPlayer = async function(encodedRelPath) {
     setupMediaSession(video);
     videoPlayer.play().catch(() => {});
     
-    // 2. Probe embedded subtitle tracks with AbortController and race condition guard
+    // 2. Probe embedded subtitle tracks with AbortController, client cache, and race condition guard
     if (currentProbeAbortController) {
         currentProbeAbortController.abort();
     }
     if (currentSubAbortController) {
         currentSubAbortController.abort();
     }
-    currentProbeAbortController = new AbortController();
-    const probeSignal = currentProbeAbortController.signal;
-    
-    try {
-        const probeResp = await fetch(`api.php?action=probe_subs&video=${encodeURIComponent(video.rel_path)}`, { signal: probeSignal });
-        const probeData = await probeResp.json();
+
+    const probeCacheKey = `${video.rel_path}:${video.mtime || ''}`;
+    let embeddedSubs = probeMemoryCache.get(probeCacheKey);
+
+    if (!embeddedSubs) {
+        currentProbeAbortController = new AbortController();
+        const probeSignal = currentProbeAbortController.signal;
         
-        // Guard against race condition: ensure this response matches active video
-        if (!activeVideo || activeVideo.rel_path !== video.rel_path) return;
-        
-        if (probeData.success && probeData.subtitles && probeData.subtitles.length > 0) {
-            probeData.subtitles.forEach(emb => {
-                currentAvailableTracks.push({
-                    type: 'embedded',
-                    label: emb.label,
-                    streamId: emb.stream_id,
-                    codec: emb.codec,
-                    lang: emb.lang,
-                    relPath: video.rel_path
-                });
+        try {
+            const probeResp = await fetch(`api.php?action=probe_subs&video=${encodeURIComponent(video.rel_path)}`, { signal: probeSignal });
+            if (!probeResp.ok) return;
+            const probeData = await probeResp.json();
+            
+            // Guard against race condition: ensure this response matches active video
+            if (!activeVideo || activeVideo.rel_path !== video.rel_path) return;
+            
+            if (probeData.success && Array.isArray(probeData.subtitles)) {
+                embeddedSubs = probeData.subtitles;
+                probeMemoryCache.set(probeCacheKey, embeddedSubs);
+            }
+        } catch (e) {
+            if (e.name !== 'AbortError') {
+                console.warn('Subtitle probe failed:', e);
+            }
+        }
+    }
+
+    if (!activeVideo || activeVideo.rel_path !== video.rel_path) return;
+    if (embeddedSubs && embeddedSubs.length > 0) {
+        embeddedSubs.forEach(emb => {
+            currentAvailableTracks.push({
+                type: 'embedded',
+                label: emb.label,
+                streamId: emb.stream_id,
+                codec: emb.codec,
+                lang: emb.lang,
+                relPath: video.rel_path
             });
-        }
-    } catch (e) {
-        if (e.name !== 'AbortError') {
-            console.warn('Subtitle probe failed:', e);
-        }
+        });
     }
     
     if (!activeVideo || activeVideo.rel_path !== video.rel_path) return;
+    const prevSelectedVal = subSelect.value;
     renderSubtitleDropdown(currentAvailableTracks, null);
+    if (userManuallySelectedSubtitle && prevSelectedVal !== '__loading__') {
+        subSelect.value = prevSelectedVal;
+    }
     
     // 3. Auto-select Korean subtitle if available (unless user manually picked one)
     if (!userManuallySelectedSubtitle && currentAvailableTracks.length > 0) {
@@ -1130,6 +1277,7 @@ function renderSubtitleDropdown(tracks, loadingNotice) {
 }
 
 const subtitleMemoryCache = new Map();
+const probeMemoryCache = new Map();
 let currentProbeAbortController = null;
 let currentSubAbortController = null;
 
@@ -1175,7 +1323,9 @@ async function loadSelectedTrack(track) {
         const resp = await fetch(url, { signal: currentSignal });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         
-        if (!resp.body || isSami) {
+        // All external subtitle files (!isEmbedded) must pass through decodeSubtitleBuffer()
+        // so EUC-KR (CP949) and UTF-16LE/BE external .srt/.ass/.smi/.vtt files decode properly.
+        if (!resp.body || !isEmbedded || isSami) {
             const buffer = await resp.arrayBuffer();
             if (activeVideo !== requestedVideo) return;
             const text = decodeSubtitleBuffer(buffer);
@@ -1196,6 +1346,7 @@ async function loadSelectedTrack(track) {
         const decoder = new TextDecoder('utf-8');
         let rawBuffer = '';
         let lastReportedCount = 0;
+        let lastParseTime = 0;
         let updateTimer = null;
         
         while (true) {
@@ -1204,24 +1355,30 @@ async function loadSelectedTrack(track) {
             if (activeVideo !== requestedVideo) return;
             rawBuffer += decoder.decode(value, { stream: true });
             
-            if (isAss) {
-                parsedSubtitles = parseASS(rawBuffer);
-            } else {
-                parsedSubtitles = parseSRT(rawBuffer);
-            }
-            
-            if (parsedSubtitles.length !== lastReportedCount) {
-                lastReportedCount = parsedSubtitles.length;
-                syncCuesToTextTrack();
-                updateSubtitleDisplay();
+            const now = Date.now();
+            if (lastReportedCount === 0 || (now - lastParseTime) >= 220) {
+                lastParseTime = now;
+                if (isAss) {
+                    parsedSubtitles = parseASS(rawBuffer);
+                } else {
+                    parsedSubtitles = parseSRT(rawBuffer);
+                }
                 
-                if (!updateTimer) {
-                    updateTimer = setTimeout(() => {
-                        updateTimer = null;
-                        if (parsedSubtitles.length > 0 && !currentSignal.aborted) {
-                            showToast(`자막 실시간 읽는 중... (${parsedSubtitles.length}개)`);
-                        }
-                    }, 800);
+                if (parsedSubtitles.length !== lastReportedCount) {
+                    lastReportedCount = parsedSubtitles.length;
+                    if (isFullscreen()) {
+                        syncCuesToTextTrack();
+                    }
+                    updateSubtitleDisplay();
+                    
+                    if (!updateTimer) {
+                        updateTimer = setTimeout(() => {
+                            updateTimer = null;
+                            if (parsedSubtitles.length > 0 && !currentSignal.aborted) {
+                                showToast(`자막 실시간 읽는 중... (${parsedSubtitles.length}개)`);
+                            }
+                        }, 800);
+                    }
                 }
             }
         }
@@ -1233,6 +1390,11 @@ async function loadSelectedTrack(track) {
 
         if (parsedSubtitles.length > 0) {
             subtitleMemoryCache.set(cacheKey, parsedSubtitles);
+        }
+
+        if (updateTimer) {
+            clearTimeout(updateTimer);
+            updateTimer = null;
         }
 
         syncCuesToTextTrack();
@@ -1267,6 +1429,14 @@ function clearSubtitles() {
     subtitleOffset = 0;
     if (syncDisplay) syncDisplay.textContent = '0.0s';
     
+    if (currentVttBlobUrl) {
+        URL.revokeObjectURL(currentVttBlobUrl);
+        currentVttBlobUrl = null;
+    }
+    const nativeTrackEl = document.getElementById('webplayer-native-track');
+    if (nativeTrackEl) {
+        nativeTrackEl.removeAttribute('src');
+    }
     if (videoPlayer && videoPlayer.textTracks) {
         for (let i = 0; i < videoPlayer.textTracks.length; i++) {
             const track = videoPlayer.textTracks[i];
@@ -1325,24 +1495,64 @@ function decodeSubtitleBuffer(buffer) {
     return new TextDecoder('utf-8').decode(buffer);
 }
 
+function decodeHtmlEntities(str) {
+    if (!str) return '';
+    return str
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;|&#x27;/gi, "'")
+        .replace(/&#34;|&#x22;/gi, '"')
+        .replace(/&#x([0-9a-fA-F]{1,6});/gi, (match, hex) => {
+            try { return String.fromCodePoint ? String.fromCodePoint(parseInt(hex, 16)) : String.fromCharCode(parseInt(hex, 16)); } catch (e) { return match; }
+        })
+        .replace(/&#([0-9]{1,7});/g, (match, dec) => {
+            try { return String.fromCodePoint ? String.fromCodePoint(parseInt(dec, 10)) : String.fromCharCode(parseInt(dec, 10)); } catch (e) { return match; }
+        });
+}
+
 function parseTimestamp(str) {
     if (!str) return 0;
-    const parts = str.trim().replace(',', '.').split(':');
+    // Strip trailing WebVTT cue settings (e.g. "00:01:13.500 line:90% align:center")
+    const token = str.trim().split(/\s+/)[0].replace(',', '.');
+    const parts = token.split(':');
+    let res = 0;
     if (parts.length === 3) {
-        return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+        res = parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
     } else if (parts.length === 2) {
-        return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+        res = parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+    } else {
+        res = parseFloat(parts[0]);
     }
-    return parseFloat(parts[0]) || 0;
+    return (isFinite(res) && res >= 0) ? res : 0;
+}
+
+function finalizeCues(cues) {
+    cues.sort((a, b) => a.start - b.start);
+    let maxFiniteDur = 0;
+    for (let i = 0; i < cues.length; i++) {
+        const dur = cues[i].end - cues[i].start;
+        if (isFinite(dur) && dur > maxFiniteDur) {
+            maxFiniteDur = dur;
+        }
+    }
+    cues._maxFiniteDur = maxFiniteDur;
+    return cues;
 }
 
 function parseSRT(srtText) {
     const cues = [];
     const normalized = srtText.replace(/\r\n|\r/g, '\n');
-    const blocks = normalized.split('\n\n');
+    const blocks = normalized.split(/\n\s*\n/);
     
     for (const block of blocks) {
-        const lines = block.trim().split('\n');
+        const trimmedBlock = block.trim();
+        if (!trimmedBlock || /^WEBVTT\b/i.test(trimmedBlock) || /^STYLE\b/i.test(trimmedBlock) || /^NOTE\b/i.test(trimmedBlock)) {
+            continue;
+        }
+        const lines = trimmedBlock.split('\n');
         // BUG-1: Use findIndex instead of hardcoded lines[0]/[1] heuristic —
         // correctly handles SRT with or without sequence-number lines, and SRT
         // blocks where extra blank lines produce different array lengths.
@@ -1357,17 +1567,16 @@ function parseSRT(srtText) {
                 const end = parseTimestamp(times[1].trim());
                 
                 let rawText = textLines.join('\n');
-                const isTop = rawText.includes('{\\an8}') || rawText.includes('{\\an7}') || rawText.includes('{\\an9}');
+                const isTop = rawText.includes('{\\an8}') || rawText.includes('{\\an7}') || rawText.includes('{\\an9}') || /\bline:(?:[0-9]|1[0-5])%/i.test(times[1]);
                 
                 // Keep '\n' as a real newline here rather than an HTML '<br>' -
                 // the text is untrusted (comes straight from the video file's
                 // subtitle track) and still needs to pass through escapeHtml()
                 // at render time before touching innerHTML. '<br>' insertion
                 // happens after escaping, in updateSubtitleDisplay().
-                let cleanText = rawText
+                let cleanText = decodeHtmlEntities(rawText
                     .replace(/\{[^}]+\}/g, '')
-                    .replace(/<[^>]+>/g, '')
-                    .trim();
+                    .replace(/<[^>]+>/g, '')).trim();
 
                 if (cleanText && end > start) {
                     cues.push({ start, end, text: cleanText, isTop });
@@ -1375,17 +1584,17 @@ function parseSRT(srtText) {
             }
         }
     }
-    cues.sort((a, b) => a.start - b.start);
-    return cues;
+    return finalizeCues(cues);
 }
 
 function parseASS(assText) {
     const cues = [];
     const lines = assText.replace(/\r\n|\r/g, '\n').split('\n');
     for (const line of lines) {
-        if (line.startsWith('Dialogue:')) {
-            const commaIdx = line.indexOf(':');
-            const parts = line.substring(commaIdx + 1).split(',');
+        const trimmed = line.trim();
+        if (/^Dialogue\s*:/i.test(trimmed)) {
+            const commaIdx = trimmed.indexOf(':');
+            const parts = trimmed.substring(commaIdx + 1).split(',');
             if (parts.length >= 10) {
                 const start = parseTimestamp(parts[1].trim());
                 const end = parseTimestamp(parts[2].trim());
@@ -1396,12 +1605,11 @@ function parseASS(assText) {
                 // '\n' / ' ' here are real newline/NBSP characters, not
                 // HTML - see the note in parseSRT() about why this text still
                 // has to go through escapeHtml() before touching innerHTML.
-                let cleanText = rawText
+                let cleanText = decodeHtmlEntities(rawText
                     .replace(/\{[^}]+\}/g, '')
-                    .replace(/\\N/g, '\n')
+                    .replace(/\\N/gi, '\n')
                     .replace(/\\n/g, '\n')
-                    .replace(/\\h/g, ' ')
-                    .trim();
+                    .replace(/\\h/gi, ' ')).trim();
 
                 if (cleanText && end > start) {
                     cues.push({ start, end, text: cleanText, isTop });
@@ -1409,8 +1617,7 @@ function parseASS(assText) {
             }
         }
     }
-    cues.sort((a, b) => a.start - b.start);
-    return cues;
+    return finalizeCues(cues);
 }
 
 function parseSAMI(smiText) {
@@ -1433,13 +1640,7 @@ function parseSAMI(smiText) {
         // 나머지 모든 HTML 태그 제거 (<font color=...> 등)
         content = content.replace(/<[^>]+>/g, '');
         // HTML 엔티티 디코딩
-        content = content
-            .replace(/&nbsp;/gi, ' ')
-            .replace(/&amp;/gi, '&')
-            .replace(/&lt;/gi, '<')
-            .replace(/&gt;/gi, '>')
-            .replace(/&quot;/gi, '"')
-            .replace(/&#39;/gi, "'");
+        content = decodeHtmlEntities(content);
         // 각 줄 앞뒤 공백 정리 후 빈 줄 제거, 실제 개행으로 조합
         // (HTML '<br>' 조합은 렌더링 시 escapeHtml() 이후로 미룸 - 자막 텍스트는
         // 신뢰할 수 없는 입력이라 innerHTML에 넣기 전에 반드시 이스케이프해야 함)
@@ -1463,23 +1664,34 @@ function parseSAMI(smiText) {
                 isTop: false
             });
         } else if (cues.length > 0) {
-            // 빈 SYNC = 이전 자막의 종료 시각
-            const prev = cues[cues.length - 1];
-            if (startSec > prev.start) {
-                prev.end = startSec;
+            // 빈 SYNC = 직전 열려있는 모든 자막들의 종료 시각
+            for (let j = cues.length - 1; j >= 0; j--) {
+                if (cues[j].end === Infinity) {
+                    if (startSec > cues[j].start) {
+                        cues[j].end = startSec;
+                    }
+                } else {
+                    break;
+                }
             }
         }
     }
 
-    // 겹침 방지: 다음 자막 시작 전에 끝나도록 보정
+    // 겹침 방지: 다음 자막 시작 전에 끝나도록 보정하되, 동일 시각 자막(동시 대사/다국어)의 조기 소멸 방지
     for (let i = 0; i < cues.length - 1; i++) {
-        if (cues[i].end > cues[i + 1].start) {
-            cues[i].end = cues[i + 1].start;
+        let nextStart = Infinity;
+        for (let j = i + 1; j < cues.length; j++) {
+            if (cues[j].start > cues[i].start) {
+                nextStart = cues[j].start;
+                break;
+            }
+        }
+        if (nextStart !== Infinity && cues[i].end > nextStart) {
+            cues[i].end = nextStart;
         }
     }
 
-    cues.sort((a, b) => a.start - b.start);
-    return cues;
+    return finalizeCues(cues);
 }
 
 // -------------------------------------------------------------
@@ -1532,15 +1744,16 @@ function applySubtitleStyle() {
 }
 
 function updateSubtitleScale(newScale) {
-    subScale = Math.max(0.6, Math.min(3.0, newScale));
-    localStorage.setItem('mycloud_sub_scale', subScale);
+    subScale = Math.round(Math.max(0.6, Math.min(3.0, newScale)) * 100) / 100;
+    safeSetItem('mycloud_sub_scale', subScale);
     applySubtitleStyle();
+    showToast(`자막 크기: ${Math.round(subScale * 100)}%`);
 }
 
 if (subBgToggleBtn) {
     subBgToggleBtn.addEventListener('click', () => {
         subBgEnabled = !subBgEnabled;
-        localStorage.setItem('mycloud_sub_bg', subBgEnabled ? 'true' : 'false');
+        safeSetItem('mycloud_sub_bg', subBgEnabled ? 'true' : 'false');
         applySubtitleStyle();
     });
 }
@@ -1570,19 +1783,24 @@ syncResetBtn.addEventListener('click', () => {
     updateSubtitleDisplay();
 });
 
+const customSubBlobUrls = [];
 customSubBtn.addEventListener('click', () => customSubInput.click());
 customSubInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    customSubInput.value = '';
     
     const ext = file.name.split('.').pop().toLowerCase();
+    const blobUrl = URL.createObjectURL(file);
+    customSubBlobUrls.push(blobUrl);
     const track = {
         type: 'external',
         label: `[로컬 파일] ${file.name}`,
-        url: URL.createObjectURL(file),
+        url: blobUrl,
         ext: ext,
         lang: ext
     };
+    userManuallySelectedSubtitle = true;
     currentAvailableTracks.unshift(track);
     renderSubtitleDropdown(currentAvailableTracks, null);
     subSelect.value = '0';
@@ -1604,7 +1822,8 @@ function closePlayer() {
     }
     if (isMinimized) restoreFromMinimize();
     videoPlayer.pause();
-    videoPlayer.src = '';
+    videoPlayer.removeAttribute('src');
+    videoPlayer.load();
     currentSpeedIndex = 1;
     if (videoPlayer) videoPlayer.playbackRate = 1.0;
     if (videoSpeedText) videoSpeedText.textContent = '1.0x';
@@ -1617,6 +1836,12 @@ function closePlayer() {
         currentSubAbortController.abort();
         currentSubAbortController = null;
     }
+    while (customSubBlobUrls.length > 0) {
+        const u = customSubBlobUrls.pop();
+        subtitleMemoryCache.delete(`${u}:`);
+        try { URL.revokeObjectURL(u); } catch (e) {}
+    }
+    userManuallySelectedSubtitle = false;
     clearSubtitles();
     playerModal.classList.remove('active');
     hasCustomPosition = false;
@@ -1635,7 +1860,7 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     // Suppress player hotkeys when typing in search input or dropdowns (Item 20)
-    if (e.target.matches('input, select, textarea') || e.target.isContentEditable) {
+    if (e.target && typeof e.target.matches === 'function' && e.target.matches('input, select, textarea') || (e.target && e.target.isContentEditable)) {
         if (e.key === 'Escape') e.target.blur();
         return;
     }
@@ -1671,7 +1896,10 @@ document.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowRight') {
             e.preventDefault();
             const step = e.shiftKey ? 30 : 5;
-            videoPlayer.currentTime = Math.min(videoPlayer.duration || 0, videoPlayer.currentTime + step);
+            const maxTime = (videoPlayer.duration && isFinite(videoPlayer.duration) && videoPlayer.duration > 0)
+                ? videoPlayer.duration
+                : Infinity;
+            videoPlayer.currentTime = Math.min(maxTime, Math.max(0, videoPlayer.currentTime + step));
             showToast(`탐색: +${step}초`);
             return;
         }
@@ -1709,7 +1937,7 @@ document.addEventListener('keydown', (e) => {
             toggleMinimize();
         } else if (e.key === 'b' || e.key === 'B') {
             subBgEnabled = !subBgEnabled;
-            localStorage.setItem('mycloud_sub_bg', subBgEnabled ? 'true' : 'false');
+            safeSetItem('mycloud_sub_bg', subBgEnabled ? 'true' : 'false');
             applySubtitleStyle();
         } else if (e.key === '+' || e.key === '=') {
             updateSubtitleScale(subScale + 0.15);
@@ -1761,18 +1989,26 @@ clearSearchBtn.addEventListener('click', () => {
 
 refreshBtn.addEventListener('click', () => loadData(currentDir, currentMode));
 
-function showToast(msg) {
+let toastTimer = null;
+function showToast(msg, duration = 2500) {
     if (!toastEl) return;
     toastEl.textContent = msg;
     toastEl.classList.add('show');
-    setTimeout(() => toastEl.classList.remove('show'), 2500);
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+        toastEl.classList.remove('show');
+        toastTimer = null;
+    }, duration);
 }
 
 function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 // BUG-6: encodeURIComponent deliberately does not encode ' (apostrophe), which
@@ -1784,22 +2020,33 @@ function pathEncode(path) {
 
 window.addEventListener('resize', () => {
     if (!playerModal.classList.contains('active')) return;
-    // Clamp dialog size to fit new window dimensions (BUG-3: merged from removed inner handler)
+    const margin = getModalViewportMargin();
     if (modalDialog) {
-        const maxW = window.innerWidth - 20;
-        const maxH = window.innerHeight - 20;
-        if (modalDialog.offsetWidth > maxW) modalDialog.style.width = `${maxW}px`;
-        if (modalDialog.offsetHeight > maxH) modalDialog.style.height = `${maxH}px`;
+        if (isMinimized) {
+            const mw = Math.min(340, window.innerWidth - margin * 2);
+            modalDialog.style.width = `${mw}px`;
+            modalDialog.style.height = '';
+        } else if (window.innerWidth <= 640) {
+            modalDialog.style.width = '';
+            modalDialog.style.height = '';
+        } else {
+            const maxW = window.innerWidth - margin * 2;
+            const maxH = window.innerHeight - margin * 2;
+            if (modalDialog.style.width && modalDialog.offsetWidth > maxW) {
+                modalDialog.style.width = `${maxW}px`;
+            }
+            if (modalDialog.style.height && modalDialog.offsetHeight > maxH) {
+                modalDialog.style.height = `${maxH}px`;
+            }
+        }
     }
     // Clamp dialog position to keep it on screen
-    if (hasCustomPosition) {
+    if (hasCustomPosition && modalDialog) {
         const rect = modalDialog.getBoundingClientRect();
-        const maxLeft = Math.max(10, window.innerWidth - modalDialog.offsetWidth - 10);
-        const maxTop = Math.max(10, window.innerHeight - modalDialog.offsetHeight - 10);
-        if (rect.left > maxLeft || rect.top > maxTop || rect.left < 10 || rect.top < 10) {
-            modalDialog.style.left = `${Math.max(10, Math.min(rect.left, maxLeft))}px`;
-            modalDialog.style.top = `${Math.max(10, Math.min(rect.top, maxTop))}px`;
-        }
+        const maxLeft = Math.max(margin, window.innerWidth - modalDialog.offsetWidth - margin);
+        const maxTop = Math.max(margin, window.innerHeight - modalDialog.offsetHeight - margin);
+        modalDialog.style.left = `${Math.max(margin, Math.min(Math.round(rect.left), maxLeft))}px`;
+        modalDialog.style.top = `${Math.max(margin, Math.min(Math.round(rect.top), maxTop))}px`;
     } else {
         centerModalDialog();
     }
@@ -1825,13 +2072,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         await loadData(parentDir, 'folder');
 
         // Locate and open the requested video immediately
-        const found = currentVideos.find(v => v.rel_path === cleanPath || v.rel_path.endsWith('/' + cleanPath) || cleanPath.endsWith(v.rel_path));
+        const found = currentVideos.find(v => v.rel_path === cleanPath || v.rel_path.endsWith('/' + cleanPath) || cleanPath.endsWith('/' + v.rel_path) || v.name === cleanPath);
         if (found) {
             openPlayer(encodeURIComponent(found.rel_path));
         } else {
             // If not found in parent folder, try searching in all mode
             await loadData('', 'all');
-            const foundAll = currentVideos.find(v => v.rel_path === cleanPath || v.rel_path.endsWith('/' + cleanPath) || cleanPath.endsWith(v.rel_path));
+            const foundAll = currentVideos.find(v => v.rel_path === cleanPath || v.rel_path.endsWith('/' + cleanPath) || cleanPath.endsWith('/' + v.rel_path) || v.name === cleanPath);
             if (foundAll) {
                 openPlayer(encodeURIComponent(foundAll.rel_path));
             }
@@ -1905,7 +2152,10 @@ function setupMediaSession(video) {
         navigator.mediaSession.setActionHandler('seekforward', (details) => {
             if (!videoPlayer) return;
             const skipTime = details.seekOffset || 10;
-            videoPlayer.currentTime = Math.min(videoPlayer.currentTime + skipTime, videoPlayer.duration || 0);
+            const maxTime = (videoPlayer.duration && isFinite(videoPlayer.duration) && videoPlayer.duration > 0)
+                ? videoPlayer.duration
+                : Infinity;
+            videoPlayer.currentTime = Math.min(videoPlayer.currentTime + skipTime, maxTime);
             updateMediaSessionPosition();
         });
         try {
@@ -1920,6 +2170,22 @@ function setupMediaSession(video) {
 }
 
 if (videoPlayer) {
+    videoPlayer.addEventListener('error', () => {
+        if (!videoPlayer.src || videoPlayer.src === window.location.href) return;
+        const err = videoPlayer.error;
+        let msg = '동영상 재생 중 오류가 발생했습니다.';
+        if (err) {
+            if (err.code === 4) {
+                msg = '브라우저에서 지원하지 않는 비디오 코덱(HEVC/H.265 등)이거나 파일을 찾을 수 없습니다.';
+            } else if (err.code === 3) {
+                msg = '비디오 디코딩 중 오류가 발생했습니다.';
+            } else if (err.code === 2) {
+                msg = '네트워크 전송 오류로 비디오를 불러올 수 없습니다.';
+            }
+        }
+        showToast(msg, 5000);
+    });
+
     let lastMsPosUpdate = 0;
     videoPlayer.addEventListener('play', () => {
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';

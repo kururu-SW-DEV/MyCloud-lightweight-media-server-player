@@ -367,7 +367,7 @@ def stream_subtitles_cues(video_path, stream_id):
                     tpriv = tracks_data[vpos : vpos + isz]
                 ep = vpos + isz
             is_sub = (ttype == 17) or (tcodec and 'S_' in tcodec)
-            if is_sub and (cur_stream == target_stream_idx or tnum == target_stream_idx):
+            if is_sub and cur_stream == target_stream_idx:
                 target_track_num = tnum
                 target_codec = tcodec
                 codec_private = tpriv
@@ -1230,7 +1230,7 @@ INDEX_HTML = """<!DOCTYPE html>
         <!-- Header -->
         <header class="navbar">
             <div class="brand" onclick="switchMode('folder', '')" style="cursor: pointer;" title="홈으로 이동">
-                <span class="icon">🎬</span>
+                <span class="icon">[영상]</span>
                 <h1>MyCloud <span>Media Player</span></h1>
             </div>
             <div class="search-bar">
@@ -1238,7 +1238,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 <button id="clear-search" class="clear-btn" title="검색어 지우기">&times;</button>
             </div>
             <div class="nav-actions">
-                <button id="refresh-btn" class="btn btn-secondary" title="새로고침">🔄 새로고침</button>
+                <button id="refresh-btn" class="btn btn-secondary" title="새로고침">[새로고침] 새로고침</button>
             </div>
         </header>
 
@@ -1247,33 +1247,33 @@ INDEX_HTML = """<!DOCTYPE html>
             <!-- Directory Path, Mode Toggle & Status -->
             <div class="breadcrumb-container">
                 <div class="breadcrumbs" id="breadcrumbs">
-                    <span class="crumb active" data-path="">🏠 Public</span>
+                    <span class="crumb active" data-path="">[홈] Public</span>
                 </div>
                 <div class="toolbar-right">
                     <div class="view-mode-toggle">
-                        <button id="mode-folder-btn" class="btn-mode active" title="폴더별 탐색">📁 폴더별</button>
-                        <button id="mode-all-btn" class="btn-mode" title="모든 폴더의 영상을 한 번에 보기">🎬 전체 영상</button>
+                        <button id="mode-folder-btn" class="btn-mode active" title="폴더별 탐색">[폴더] 폴더별</button>
+                        <button id="mode-all-btn" class="btn-mode" title="모든 폴더의 영상을 한 번에 보기">[영상] 전체 영상</button>
                     </div>
                     <div class="layout-toggle" title="목록 표시 형태">
-                        <button id="layout-grid-btn" class="btn-layout" title="타일 형식으로 보기">🔲 타일</button>
-                        <button id="layout-list-btn" class="btn-layout active" title="목록(리스트) 형식으로 보기">☰ 목록</button>
+                        <button id="layout-grid-btn" class="btn-layout" title="타일 형식으로 보기">[전체선택] 타일</button>
+                        <button id="layout-list-btn" class="btn-layout active" title="목록(리스트) 형식으로 보기">[목록] 목록</button>
                     </div>
                     <div class="meta-toggle" title="파일 날짜 및 용량 표시 설정 (기본: 숨김)">
                         <button id="meta-hide-btn" class="btn-layout active" title="파일 날짜 및 용량 숨김 (기본값)">
-                            <span class="toggle-text-full">🙈 날짜·용량 숨김</span>
-                            <span class="toggle-text-short">🙈 숨김</span>
+                            <span class="toggle-text-full">[숨김] 날짜·용량 숨김</span>
+                            <span class="toggle-text-short">[숨김] 숨김</span>
                         </button>
                         <button id="meta-show-btn" class="btn-layout" title="파일 날짜 및 용량 표시">
-                            <span class="toggle-text-full">👁️ 날짜·용량 표시</span>
-                            <span class="toggle-text-short">👁️ 표시</span>
+                            <span class="toggle-text-full">[표시]️ 날짜·용량 표시</span>
+                            <span class="toggle-text-short">[표시]️ 표시</span>
                         </button>
                     </div>
                     <select id="sort-select" class="sort-select" title="정렬 기준">
-                        <option value="name_asc" selected>🔤 이름순 (1,2,3..)</option>
-                        <option value="name_desc">🔤 이름 역순</option>
-                        <option value="date_desc">📅 최신 등록순</option>
-                        <option value="date_asc">📅 오래된 등록순</option>
-                        <option value="size_desc">💾 파일 크기순</option>
+                        <option value="name_asc" selected>[이름] 이름순 (1,2,3..)</option>
+                        <option value="name_desc">[이름] 이름 역순</option>
+                        <option value="date_desc">[날짜] 최신 등록순</option>
+                        <option value="date_asc">[날짜] 오래된 등록순</option>
+                        <option value="size_desc">[저장] 파일 크기순</option>
                     </select>
                     <div class="stats" id="stats-badge">불러오는 중...</div>
                 </div>
@@ -1291,13 +1291,13 @@ INDEX_HTML = """<!DOCTYPE html>
         <div class="modal-dialog">
             <div class="modal-header" title="마우스로 드래그하여 창 이동 (더블클릭: 중앙 정렬)">
                 <h2 id="player-title" class="video-title-display">
-                    <span class="drag-handle-icon" title="마우스로 드래그하여 창 이동">✥</span>
+                    <span class="drag-handle-icon" title="마우스로 드래그하여 창 이동">[이동]</span>
                     <span id="player-title-text">제목</span>
                 </h2>
                 <div class="modal-header-actions">
-                    <button id="prev-video-btn" class="btn btn-small" title="이전 영상 재생 (단축키: Shift + P)">⏮️ 이전</button>
-                    <button id="next-video-btn" class="btn btn-small" title="다음 영상 재생 (단축키: Shift + N)">다음 ⏭️</button>
-                    <button id="fullscreen-btn" class="btn btn-small" title="전체화면 (단축키: F 또는 더블클릭)">⛶ 전체화면</button>
+                    <button id="prev-video-btn" class="btn btn-small" title="이전 영상 재생 (단축키: Shift + P)">[이전]️ 이전</button>
+                    <button id="next-video-btn" class="btn btn-small" title="다음 영상 재생 (단축키: Shift + N)">다음 [다음]️</button>
+                    <button id="fullscreen-btn" class="btn btn-small" title="전체화면 (단축키: F 또는 더블클릭)">[전체화면] 전체화면</button>
                     <button id="close-player-btn" class="btn-close" title="닫기 (Esc)">&times;</button>
                 </div>
             </div>
@@ -1315,12 +1315,12 @@ INDEX_HTML = """<!DOCTYPE html>
                     <select id="sub-select" class="select-input">
                         <option value="">자막 없음</option>
                     </select>
-                    <button id="custom-sub-btn" class="btn btn-small">📂 외부 자막 열기</button>
+                    <button id="custom-sub-btn" class="btn btn-small">[폴더] 외부 자막 열기</button>
                     <input type="file" id="custom-sub-input" accept=".smi,.sami,.srt,.ass,.ssa,.vtt" style="display:none">
                 </div>
                 <div class="control-group">
                     <span>자막 스타일:</span>
-                    <button id="sub-bg-toggle" class="btn btn-small" title="자막 배경 박스 전환 (단축키: B)">🔳 배경: 있음</button>
+                    <button id="sub-bg-toggle" class="btn btn-small" title="자막 배경 박스 전환 (단축키: B)">[선택] 배경: 있음</button>
                     <button id="font-decrease" class="btn btn-small" title="자막 축소 (단축키: -)">A-</button>
                     <button id="font-increase" class="btn btn-small" title="자막 확대 (단축키: +)">A+</button>
                 </div>
@@ -2675,10 +2675,10 @@ function playNextVideo() {
     const nextIndex = currentIndex + 1;
     if (nextIndex < sortedVideos.length) {
         const nextVideo = sortedVideos[nextIndex];
-        showToast(`⏭️ 다음 영상 자동 재생: ${nextVideo.name}`);
+        showToast(`[다음]️ 다음 영상 자동 재생: ${nextVideo.name}`);
         openPlayer(encodeURIComponent(nextVideo.rel_path));
     } else {
-        showToast('🏁 마지막 영상입니다.');
+        showToast('[종료] 마지막 영상입니다.');
     }
 }
 
@@ -2692,7 +2692,7 @@ function playPrevVideo() {
     const prevIndex = currentIndex - 1;
     if (prevIndex >= 0) {
         const prevVideo = sortedVideos[prevIndex];
-        showToast(`⏮️ 이전 영상 재생: ${prevVideo.name}`);
+        showToast(`[이전]️ 이전 영상 재생: ${prevVideo.name}`);
         openPlayer(encodeURIComponent(prevVideo.rel_path));
     } else {
         showToast('첫 번째 영상입니다.');
@@ -2816,7 +2816,7 @@ function handleFullscreenChange() {
     // Update Fullscreen button text in modal header
     if (fullscreenBtn) {
         const isFs = !!fsElem;
-        fullscreenBtn.innerHTML = isFs ? '🗗 전체화면 해제' : '⛶ 전체화면';
+        fullscreenBtn.innerHTML = isFs ? '[창] 전체화면 해제' : '[전체화면] 전체화면';
         fullscreenBtn.title = isFs ? '전체화면 해제 (단축키: F 또는 Esc)' : '전체화면 (단축키: F 또는 더블클릭)';
     }
     
@@ -2947,20 +2947,20 @@ function updateBreadcrumbs() {
     
     if (currentMode === 'all') {
         breadcrumbsContainer.innerHTML = `
-            <span class="crumb" onclick="switchMode('folder', '')">🏠 Public</span>
+            <span class="crumb" onclick="switchMode('folder', '')">[홈] Public</span>
             <span class="crumb-sep">›</span>
-            <span class="crumb active">🎬 전체 영상 모아보기</span>
+            <span class="crumb active">[영상] 전체 영상 모아보기</span>
         `;
         return;
     }
     
     if (!currentDir) {
-        breadcrumbsContainer.innerHTML = `<span class="crumb active" data-path="">🏠 Public</span>`;
+        breadcrumbsContainer.innerHTML = `<span class="crumb active" data-path="">[홈] Public</span>`;
         return;
     }
     
     const parts = currentDir.split('/');
-    let html = `<span class="crumb" onclick="openFolder('')">🏠 Public</span>`;
+    let html = `<span class="crumb" onclick="openFolder('')">[홈] Public</span>`;
     let accumulated = '';
     
     parts.forEach((p, idx) => {
@@ -3038,7 +3038,7 @@ function applySortAndRender() {
                     <div class="loading-spinner">
                         현재 폴더에 '<strong>${escapeHtml(query)}</strong>' 검색 결과가 없습니다.<br><br>
                         <button onclick="switchMode('all'); searchInput.value='${escapeHtml(query)}'; applySortAndRender();" class="btn btn-secondary">
-                            🎬 전체 영상 모아보기에서 검색하기
+                            [영상] 전체 영상 모아보기에서 검색하기
                         </button>
                     </div>
                 `;
@@ -3149,20 +3149,20 @@ function renderGrid(dirs, videos) {
     
     if (dirs && dirs.length > 0) {
         dirs.forEach(d => {
-            let metaDesc = '📁 폴더';
+            let metaDesc = '[폴더] 폴더';
             if (d.video_count > 0 && d.subdir_count > 0) {
-                metaDesc = `🎬 영상 ${d.video_count}개 · 📁 ${d.subdir_count}개`;
+                metaDesc = `[영상] 영상 ${d.video_count}개 · [폴더] ${d.subdir_count}개`;
             } else if (d.video_count > 0) {
-                metaDesc = `🎬 영상 ${d.video_count}개`;
+                metaDesc = `[영상] 영상 ${d.video_count}개`;
             } else if (d.subdir_count > 0) {
-                metaDesc = `📁 하위 폴더 ${d.subdir_count}개`;
+                metaDesc = `[폴더] 하위 폴더 ${d.subdir_count}개`;
             }
             
             html += `
                 <div class="folder-card" onclick="openFolder('${encodeURIComponent(d.rel_path)}')">
                     <div class="folder-thumbnail">
                         <span class="card-folder-badge">폴더</span>
-                        <div class="folder-icon">📁</div>
+                        <div class="folder-icon">[폴더]</div>
                     </div>
                     <div class="card-content">
                         <div class="list-main-col">
@@ -3191,7 +3191,7 @@ function renderGrid(dirs, videos) {
             }
             
             const folderTag = (currentMode === 'all' && v.folder)
-                ? `<div class="card-folder-path" title="${escapeHtml(v.folder)}">📁 ${escapeHtml(v.folder)}</div>`
+                ? `<div class="card-folder-path" title="${escapeHtml(v.folder)}">[폴더] ${escapeHtml(v.folder)}</div>`
                 : '';
                 
             html += `
@@ -3207,8 +3207,8 @@ function renderGrid(dirs, videos) {
                         </div>
                         <div class="list-sub-col">
                             <div class="card-meta">
-                                <span class="meta-size">💾 ${v.size_formatted}</span>
-                                <span class="meta-date">📅 ${(v.mtime_formatted || '').split(' ')[0]}</span>
+                                <span class="meta-size">[저장] ${v.size_formatted}</span>
+                                <span class="meta-date">[날짜] ${(v.mtime_formatted || '').split(' ')[0]}</span>
                             </div>
                             <div class="card-badges">
                                 ${badgesHtml}
@@ -3273,7 +3273,7 @@ window.openPlayer = async function(encodedRelPath) {
         });
     }
     
-    renderSubtitleDropdown(currentAvailableTracks, '⏳ 내장 자막 확인 중...');
+    renderSubtitleDropdown(currentAvailableTracks, '[로딩] 내장 자막 확인 중...');
     
     playerModal.classList.add('active');
     applySubtitleStyle();
@@ -3374,7 +3374,7 @@ async function loadSelectedTrack(track) {
         parsedSubtitles = subtitleMemoryCache.get(cacheKey);
         syncCuesToTextTrack();
         updateSubtitleDisplay();
-        showToast(`⚡ 자막 즉시 로드 완료 (${parsedSubtitles.length}개 자막)`);
+        showToast(`[고속] 자막 즉시 로드 완료 (${parsedSubtitles.length}개 자막)`);
         return;
     }
     
@@ -3390,7 +3390,7 @@ async function loadSelectedTrack(track) {
                       (track.ext && (track.ext.toLowerCase() === 'ass' || track.ext.toLowerCase() === 'ssa'));
         const isSami = track.ext && (track.ext.toLowerCase() === 'smi' || track.ext.toLowerCase() === 'sami');
         
-        showToast(`⏳ [${track.label}] 실시간 읽는 중...`);
+        showToast(`[로딩] [${track.label}] 실시간 읽는 중...`);
         
         const url = isEmbedded
             ? `api.php?action=stream_sub&video=${encodeURIComponent(track.relPath)}&stream=${track.streamId}&codec=${encodeURIComponent(track.codec)}`
@@ -3411,7 +3411,7 @@ async function loadSelectedTrack(track) {
             }
             syncCuesToTextTrack();
             updateSubtitleDisplay();
-            showToast(`✅ 자막 로드 완료 (${parsedSubtitles.length}개 자막)`);
+            showToast(`[완료] 자막 로드 완료 (${parsedSubtitles.length}개 자막)`);
             return;
         }
         
@@ -3441,7 +3441,7 @@ async function loadSelectedTrack(track) {
                     updateTimer = setTimeout(() => {
                         updateTimer = null;
                         if (parsedSubtitles.length > 0 && !currentSignal.aborted) {
-                            showToast(`⏳ 자막 실시간 읽는 중... (${parsedSubtitles.length}개)`);
+                            showToast(`[로딩] 자막 실시간 읽는 중... (${parsedSubtitles.length}개)`);
                         }
                     }, 800);
                 }
@@ -3458,12 +3458,12 @@ async function loadSelectedTrack(track) {
         
         syncCuesToTextTrack();
         updateSubtitleDisplay();
-        showToast(`✅ 자막 로드 완료 (${parsedSubtitles.length}개 자막)`);
+        showToast(`[완료] 자막 로드 완료 (${parsedSubtitles.length}개 자막)`);
         
     } catch (err) {
         if (err.name === 'AbortError') return;
         console.error('Failed to load subtitle:', err);
-        showToast(`❌ 자막 로드 실패: ${err.message}`);
+        showToast(`[닫기] 자막 로드 실패: ${err.message}`);
     }
 }
 
@@ -3652,7 +3652,7 @@ function applySubtitleStyle() {
         }
     }
     if (subBgToggleBtn) {
-        subBgToggleBtn.textContent = subBgEnabled ? '🔳 배경: 있음' : '🔲 배경: 없음';
+        subBgToggleBtn.textContent = subBgEnabled ? '[선택] 배경: 있음' : '[전체선택] 배경: 없음';
     }
     
     // 2. Set root CSS variable for windowed subtitle box

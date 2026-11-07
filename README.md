@@ -4,7 +4,7 @@ WD My Cloud Gen 1 (ARMv7 650MHz, 226MB RAM, 5400RPM HDD) 전용으로 설계된 
 
 ---
 
-## 📁 디렉터리 및 파일 구조
+## [폴더] 디렉터리 및 파일 구조
 
 ```
 ├── webplayer/                  # [웹서버 배포 소스 전용 폴더 - 실제 배포는 이 폴더 기준]
@@ -23,11 +23,11 @@ WD My Cloud Gen 1 (ARMv7 650MHz, 226MB RAM, 5400RPM HDD) 전용으로 설계된 
 └── test_and_tools/             # 실서버 검증, 벤치마크 및 진단 스크립트 모음 (125개 도구)
 ```
 
-> ⚠️ **NAS의 SSH가 매우 오래됐습니다** (OpenSSH 6.0p1, 2012년/Debian 7). `paramiko`가 5.x부터 이 서버가 쓰는 `ssh-rsa`/`ssh-dss` host key 방식을 아예 지원하지 않으므로, `requirements.txt`에 `paramiko==3.5.1`로 고정돼 있습니다. 이 프로젝트 밖에서 `pip install paramiko`로 최신 버전을 깔면 `ssh_client.py`/`deploy_webplayer.py`가 즉시 깨지니 주의하세요.
+> [주의]️ **NAS의 SSH가 매우 오래됐습니다** (OpenSSH 6.0p1, 2012년/Debian 7). `paramiko`가 5.x부터 이 서버가 쓰는 `ssh-rsa`/`ssh-dss` host key 방식을 아예 지원하지 않으므로, `requirements.txt`에 `paramiko==3.5.1`로 고정돼 있습니다. 이 프로젝트 밖에서 `pip install paramiko`로 최신 버전을 깔면 `ssh_client.py`/`deploy_webplayer.py`가 즉시 깨지니 주의하세요.
 
 ---
 
-## 🔧 설치 방법
+## [도구] 설치 방법
 
 ### 1. 사전 요구사항
 - **로컬 PC**: Python 3.8+
@@ -45,7 +45,7 @@ venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 ```
 
-> ⚠️ 위 `paramiko==3.5.1` 버전 고정은 필수입니다. 최신 버전을 깔면 이 NAS의 구형 SSH(OpenSSH 6.0p1)에 아예 접속이 안 됩니다.
+> [주의]️ 위 `paramiko==3.5.1` 버전 고정은 필수입니다. 최신 버전을 깔면 이 NAS의 구형 SSH(OpenSSH 6.0p1)에 아예 접속이 안 됩니다.
 
 ### 3. NAS 접속 정보 설정 (환경변수)
 `ssh_client.py`는 NAS 접속 정보를 하드코딩하지 않고 환경변수로 받습니다. 배포 전에 아래 값을 설정하세요.
@@ -85,7 +85,7 @@ export NAS_GROUP=share
    ```
 3. Apache를 재시작합니다: `service apache2 restart`
 
-> ℹ️ 정확한 include 경로/문법은 NAS의 Apache 배포판·버전에 따라 다를 수 있습니다. 이 NAS(Debian 7 기반)에서는 위 방식으로 동작을 확인했습니다.
+> [안내]️ 정확한 include 경로/문법은 NAS의 Apache 배포판·버전에 따라 다를 수 있습니다. 이 NAS(Debian 7 기반)에서는 위 방식으로 동작을 확인했습니다.
 
 ### 5. 배포
 로컬에서 코드를 수정한 후 아래 명령어를 실행하면 NAS로 즉시 배포 및 아파치가 재시작됩니다:
@@ -99,7 +99,7 @@ python deploy_webplayer.py
 
 ---
 
-## ⚡ 주요 기술적 특징
+## [고속] 주요 기술적 특징
 1. **Strict Zero-Disk Cache**: HDD에 자막/비디오 캐시 파일을 전혀 생성하지 않아 5400RPM HDD I/O 병목 100% 제거.
 2. **0ms Matroska Cues Direct Seek**: MKV 자막을 영상 전체 스캔 없이 Cues 인덱스 오프셋(`rpos`)을 통해 0.005초 만에 다이렉트 seek.
 3. **고아 프로세스 완전 박멸**: 사용자가 창을 닫거나 영상을 넘길 때 `connection_aborted()` 감지로 백그라운드 프로세스 즉각 종료 (`SIGKILL`).
@@ -107,18 +107,18 @@ python deploy_webplayer.py
 5. **듀얼 자막 엔진**: 창모드에서는 미려한 리치 DOM 오버레이, 전체화면에서는 네이티브 `video::cue`로 자동 동기화.
 6. **최소화(미니 플레이어)**: 플로팅 플레이어 헤더의 [이전][다음][최소화][전체화면] 버튼(단축키: M)으로 창을 화면 우하단 미니 창으로 축소 — 영상은 계속 재생되며 뒤의 폴더 목록을 그대로 탐색 가능. 이전/다음 곡 전환 시에도 최소화 상태 유지.
 
-> 🔒 **외부(포트포워딩 9991) 접속 시 로그인 필요**: `apache/apache_webplayer.conf`에 `192.168.0.0/24`(LAN)는 인증 없이 통과, 그 외 IP는 Basic 인증(`/etc/apache2/.htpasswd-webplayer`)을 요구하도록 설정. `/player`와 `/media` 둘 다 걸려있음(파일 직링크로 인증 우회 방지). 계정 관리는 NAS에서 직접: `htpasswd /etc/apache2/.htpasswd-webplayer <아이디>`.
+> [보안] **외부(포트포워딩 9991) 접속 시 로그인 필요**: `apache/apache_webplayer.conf`에 `192.168.0.0/24`(LAN)는 인증 없이 통과, 그 외 IP는 Basic 인증(`/etc/apache2/.htpasswd-webplayer`)을 요구하도록 설정. `/player`와 `/media` 둘 다 걸려있음(파일 직링크로 인증 우회 방지). 계정 관리는 NAS에서 직접: `htpasswd /etc/apache2/.htpasswd-webplayer <아이디>`.
 > 같은 파일에서 **NAS 자체 관리자 화면**(`/var/www/htdocs`, 포트 9991을 그대로 포워딩하면 `/` 경로로 노출됨)도 LAN 밖에서는 아예 403으로 막아둠 — 이건 플레이어용 약한 비밀번호로 지키기엔 위험도가 달라서 로그인 프롬프트 없이 완전 차단.
 
-> ℹ️ **다른 탭에서도 보이는 PiP는 시도 후 제거했습니다.** 브라우저 표준 PiP는 Chrome이 PiP 창 자체에 자막을 그리지 않는 [미해결 이슈](https://issues.chromium.org/issues/40581723) 때문에 자막이 전혀 안 보이고, 커스텀 오버레이까지 띄울 수 있는 Document PiP API는 HTTPS(보안 컨텍스트) 필수라 이 NAS(HTTP)에서는 애초에 동작하지 않습니다.
+> [안내]️ **다른 탭에서도 보이는 PiP는 시도 후 제거했습니다.** 브라우저 표준 PiP는 Chrome이 PiP 창 자체에 자막을 그리지 않는 [미해결 이슈](https://issues.chromium.org/issues/40581723) 때문에 자막이 전혀 안 보이고, 커스텀 오버레이까지 띄울 수 있는 Document PiP API는 HTTPS(보안 컨텍스트) 필수라 이 NAS(HTTP)에서는 애초에 동작하지 않습니다.
 
 ---
 
-## 🩹 최근 수정 사항 (2026-11-04)
+## [패치] 최근 수정 사항 (2026-11-04)
 
 ### 1. 모던 UI 개편 및 이모지 100% 제거 (WebExplorer 스타일 통합)
 - **Zero AI Slop / 100% Monochrome SVG**: HTML, JS, CSS 전반에 걸쳐 사용되던 모든 이모지를 제거하고, WebExplorer와 통일된 간결하고 세련된 Linear SVG 벡터 아이콘으로 전면 교체.
-- **상호 연동 내비게이션**: 상단 헤더에 `Explorer ↗` 버튼을 배치하여 웹 탐색기와 플레이어 간 원클릭 전환 지원.
+- **상호 연동 내비게이션**: 상단 헤더에 `Explorer ->` 버튼을 배치하여 웹 탐색기와 플레이어 간 원클릭 전환 지원.
 - **반응형 툴바 & 모바일 최적화**: 모바일 브라우저의 Safe-Area 인셋, 터치 지연 방지(`touch-action: manipulation`), 가로 스크롤 툴바 지원.
 
 ### 2. 보안 취약점 원천 방어 (Path Traversal, Symlink Escape)
@@ -145,7 +145,7 @@ python deploy_webplayer.py
 
 ---
 
-## 🩹 이전 수정 사항 (2026-09-11)
+## [패치] 이전 수정 사항 (2026-09-11)
 
 다국어(MULTi) MKV에서 한국어 자막이 안 나오거나 자막 목록 로딩이 느리다는 문제를 원인 분석 후 수정했습니다 (`webplayer/stream_sub.py`).
 
