@@ -3,6 +3,9 @@ if (PHP_SAPI !== 'cli') {
     header('Access-Control-Allow-Origin: *');
 }
 @setlocale(LC_ALL, 'C.UTF-8');
+if (file_exists(__DIR__ . '/fmp4_muxer.php')) {
+    require_once __DIR__ . '/fmp4_muxer.php';
+}
 
 function safeShellArg($arg) {
     return "'" . str_replace("'", "'\\''", $arg) . "'";
@@ -612,7 +615,61 @@ if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === '--prefetch') {
 }
 
 // -------------------------------------------------------------
-// Action 3a: Apple HLS Master Playlist (.m3u8) for iOS Safari / AVPlayer
+// Helper: Serve an in-memory buffer with exact Content-Length,
+// Accept-Ranges: bytes, HTTP 206 Partial Content, and optional gzip
+// -------------------------------------------------------------
+function serveMemoryResponse($body, $contentType, $cacheControl, $allowGzip = false) {
+    if (function_exists('apache_setenv')) @apache_setenv('no-gzip', '1');
+    @ini_set('zlib.output_compression', '0');
+    while (ob_get_level()) @ob_end_clean();
+
+    header('Content-Type: ' . $contentType);
+    header('Accept-Ranges: bytes');
+    header('Cache-Control: ' . $cacheControl);
+
+    $totalSize = strlen($body);
+    if (isset($_SERVER['HTTP_RANGE']) && preg_match('/^bytes=\s*(\d*)-(\d*)$/i', trim($_SERVER['HTTP_RANGE']), $rm)) {
+        $start = 0;
+        $end = $totalSize - 1;
+        if ($rm[1] !== '' && $rm[2] !== '') {
+            $start = (int)$rm[1];
+            $end = min($totalSize - 1, (int)$rm[2]);
+        } elseif ($rm[1] !== '') {
+            $start = (int)$rm[1];
+        } elseif ($rm[2] !== '') {
+            $start = max(0, $totalSize - (int)$rm[2]);
+        }
+        if ($start > $end || $start >= $totalSize) {
+            header('HTTP/1.1 416 Requested Range Not Satisfiable');
+            header('Content-Range: bytes */' . $totalSize);
+            exit;
+        }
+        header('HTTP/1.1 206 Partial Content');
+        header('Content-Range: bytes ' . $start . '-' . $end . '/' . $totalSize);
+        header('Content-Length: ' . ($end - $start + 1));
+        echo substr($body, $start, $end - $start + 1);
+        exit;
+    }
+
+    if ($allowGzip && $totalSize > 1024 && function_exists('gzencode')
+        && isset($_SERVER['HTTP_ACCEPT_ENCODING']) && stripos($_SERVER['HTTP_ACCEPT_ENCODING'], 'gzip') !== false) {
+        $gz = @gzencode($body, 1);
+        if ($gz !== false) {
+            header('Content-Encoding: gzip');
+            header('Vary: Accept-Encoding');
+            header('Content-Length: ' . strlen($gz));
+            echo $gz;
+            exit;
+        }
+    }
+
+    header('Content-Length: ' . $totalSize);
+    echo $body;
+    exit;
+}
+
+// -------------------------------------------------------------
+// Action 3a: Apple HLS Master Playlist (.m3u8) (Backward compatibility)
 // -------------------------------------------------------------
 if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
     $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
@@ -634,6 +691,26 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
         exit;
     }
 
+    $encodedVideo = rawurlencode($videoRel);
+    $fsize = (float)getSafeFileSize($fullVideoPath);
+
+    // Fast path: Pure-PHP HLS v7 fMP4
+    $fmp4Idx = function_exists('fmp4GetIndex') ? fmp4GetIndex($fullVideoPath) : false;
+    if ($fmp4Idx !== false) {
+        $dur = max(1.0, (float)$fmp4Idx['duration']);
+        $bw = ($fsize > 0) ? (int)max(1000000, min(20000000, ($fsize * 8.0) / $dur)) : 8000000;
+        $codecs = $fmp4Idx['v']['rfc'];
+        if (!empty($fmp4Idx['a']['rfc'])) $codecs .= ',' . $fmp4Idx['a']['rfc'];
+        $resAttr = ',RESOLUTION=' . intval($fmp4Idx['v']['w']) . 'x' . intval($fmp4Idx['v']['h']);
+        $body = "#EXTM3U\n"
+            . "#EXT-X-VERSION:7\n"
+            . "#EXT-X-INDEPENDENT-SEGMENTS\n"
+            . "#EXT-X-STREAM-INF:BANDWIDTH=" . $bw . ",CODECS=\"" . $codecs . "\"" . $resAttr . "\n"
+            . "api.php?action=hls_manifest&video=" . $encodedVideo . "&ext=.m3u8\n";
+        serveMemoryResponse($body, 'application/vnd.apple.mpegurl', 'private, max-age=300', false);
+    }
+
+    // Fallback: avconv MPEG-TS HLS v3
     $info = getHlsInfo($fullVideoPath);
     if (empty($info['success']) || empty($info['segments'])) {
         header('HTTP/1.1 422 Unprocessable Entity');
@@ -642,7 +719,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
     }
 
     $dur = max(1.0, (float)$info['duration']);
-    $fsize = (float)getSafeFileSize($fullVideoPath);
     $bw = ($fsize > 0) ? (int)max(1000000, min(20000000, ($fsize * 8.0) / $dur)) : 8000000;
     $vCodecRfc = !empty($info['video_codec_rfc']) ? $info['video_codec_rfc'] : 'avc1.640028';
     $aCodec = isset($info['audio_codec']) ? strtolower($info['audio_codec']) : '';
@@ -656,7 +732,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
     if (!empty($info['width']) && !empty($info['height'])) {
         $resAttr = ',RESOLUTION=' . intval($info['width']) . 'x' . intval($info['height']);
     }
-    $encodedVideo = rawurlencode($videoRel);
 
     $body = "#EXTM3U\n"
         . "#EXT-X-VERSION:3\n"
@@ -664,21 +739,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
         . "#EXT-X-STREAM-INF:BANDWIDTH=" . $bw . ",CODECS=\"" . $codecs . "\"" . $resAttr . "\n"
         . "api.php?action=hls_manifest&video=" . $encodedVideo . "&ext=.m3u8\n";
 
-    // Start warming up segment 0 as soon as the master playlist is fetched (non-Range)
     if (!isset($_SERVER['HTTP_RANGE'])) {
         spawnHlsPrefetch($fullVideoPath, 0);
     }
-
-    if (function_exists('apache_setenv')) @apache_setenv('no-gzip', '1');
-    header('Content-Type: application/vnd.apple.mpegurl');
-    header('Cache-Control: private, max-age=300');
-    header('Content-Length: ' . strlen($body));
-    echo $body;
-    exit;
+    serveMemoryResponse($body, 'application/vnd.apple.mpegurl', 'private, max-age=300', false);
 }
 
 // -------------------------------------------------------------
-// Action 3b: Continuous Virtual HLS Media Playlist (.m3u8)
+// Action 3b: Direct Virtual HLS Media Playlist (.m3u8)
+// Uses Pure-PHP HLS v7 fMP4 (~50ms/seg, zero avconv) when eligible,
+// with seamless automatic fallback to avconv MPEG-TS HLS v3.
 // -------------------------------------------------------------
 if (isset($_GET['action']) && $_GET['action'] === 'hls_manifest') {
     $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
@@ -700,6 +770,36 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_manifest') {
         exit;
     }
 
+    $encodedVideo = rawurlencode($videoRel);
+
+    // Fast path: Pure-PHP HLS v7 fMP4 (CMAF)
+    $fmp4Idx = function_exists('fmp4GetIndex') ? fmp4GetIndex($fullVideoPath) : false;
+    if ($fmp4Idx !== false && !empty($fmp4Idx['segments'])) {
+        $maxDur = 2;
+        foreach ($fmp4Idx['segments'] as $seg) {
+            if ($seg['dur'] > $maxDur) {
+                $maxDur = (int)ceil($seg['dur']);
+            }
+        }
+        $lines = array(
+            '#EXTM3U',
+            '#EXT-X-VERSION:7',
+            '#EXT-X-TARGETDURATION:' . $maxDur,
+            '#EXT-X-MEDIA-SEQUENCE:0',
+            '#EXT-X-PLAYLIST-TYPE:VOD',
+            '#EXT-X-INDEPENDENT-SEGMENTS',
+            '#EXT-X-MAP:URI="api.php?action=hls_init&video=' . $encodedVideo . '&ext=.mp4"'
+        );
+        foreach ($fmp4Idx['segments'] as $idx => $seg) {
+            $lines[] = sprintf('#EXTINF:%.3f,', (float)$seg['dur']);
+            $lines[] = 'api.php?action=hls_m4s&video=' . $encodedVideo . '&i=' . $idx . '&ext=.m4s';
+        }
+        $lines[] = '#EXT-X-ENDLIST';
+        $body = implode("\n", $lines) . "\n";
+        serveMemoryResponse($body, 'application/vnd.apple.mpegurl', 'private, max-age=300', true);
+    }
+
+    // Fallback: avconv MPEG-TS HLS v3
     $info = getHlsInfo($fullVideoPath);
     if (empty($info['success']) || empty($info['segments'])) {
         header('HTTP/1.1 422 Unprocessable Entity');
@@ -714,7 +814,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_manifest') {
         }
     }
 
-    $encodedVideo = rawurlencode($videoRel);
     $lines = array(
         '#EXTM3U',
         '#EXT-X-VERSION:3',
@@ -731,14 +830,74 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_manifest') {
     $body = implode("\n", $lines) . "\n";
 
     // Pre-warm segment 0 in background while client parses the playlist
-    spawnHlsPrefetch($fullVideoPath, 0);
+    if (!isset($_SERVER['HTTP_RANGE'])) {
+        spawnHlsPrefetch($fullVideoPath, 0);
+    }
+    serveMemoryResponse($body, 'application/vnd.apple.mpegurl', 'private, max-age=300', true);
+}
 
-    if (function_exists('apache_setenv')) @apache_setenv('no-gzip', '1');
-    header('Content-Type: application/vnd.apple.mpegurl');
-    header('Cache-Control: private, max-age=300');
-    header('Content-Length: ' . strlen($body));
-    echo $body;
-    exit;
+// -------------------------------------------------------------
+// Action 3c: Pure-PHP fMP4 Initialization Segment (init.mp4)
+// -------------------------------------------------------------
+if (isset($_GET['action']) && $_GET['action'] === 'hls_init') {
+    $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
+    if (empty($videoRel) || !validateRelativePath($videoRel) || !function_exists('fmp4GetIndex')) {
+        header('HTTP/1.1 400 Bad Request');
+        echo "Invalid parameters";
+        exit;
+    }
+    $rawPath = $baseDir . '/' . $videoRel;
+    if (is_link($rawPath)) {
+        header('HTTP/1.1 403 Forbidden');
+        echo "Forbidden";
+        exit;
+    }
+    $fullVideoPath = realpath($rawPath);
+    if ($fullVideoPath === false || !isWithinBaseDir($fullVideoPath, $baseDir) || !is_file($fullVideoPath)) {
+        header('HTTP/1.1 404 Not Found');
+        echo "File not found";
+        exit;
+    }
+    $fmp4Idx = fmp4GetIndex($fullVideoPath);
+    if ($fmp4Idx === false) {
+        header('HTTP/1.1 422 Unprocessable Entity');
+        echo "fMP4 unavailable";
+        exit;
+    }
+    $initBin = fmp4BuildInitSegment($fmp4Idx);
+    serveMemoryResponse($initBin, 'video/mp4', 'private, max-age=3600', false);
+}
+
+// -------------------------------------------------------------
+// Action 3d: Pure-PHP Zero-Copy fMP4 Media Segment (.m4s)
+// -------------------------------------------------------------
+if (isset($_GET['action']) && $_GET['action'] === 'hls_m4s') {
+    $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
+    $segIdx = isset($_GET['i']) ? intval($_GET['i']) : -1;
+    if (empty($videoRel) || !validateRelativePath($videoRel) || $segIdx < 0 || !function_exists('fmp4GetIndex')) {
+        header('HTTP/1.1 400 Bad Request');
+        echo "Invalid parameters";
+        exit;
+    }
+    $rawPath = $baseDir . '/' . $videoRel;
+    if (is_link($rawPath)) {
+        header('HTTP/1.1 403 Forbidden');
+        echo "Forbidden";
+        exit;
+    }
+    $fullVideoPath = realpath($rawPath);
+    if ($fullVideoPath === false || !isWithinBaseDir($fullVideoPath, $baseDir) || !is_file($fullVideoPath)) {
+        header('HTTP/1.1 404 Not Found');
+        echo "File not found";
+        exit;
+    }
+    $fmp4Idx = fmp4GetIndex($fullVideoPath);
+    if ($fmp4Idx === false) {
+        header('HTTP/1.1 422 Unprocessable Entity');
+        echo "fMP4 unavailable";
+        exit;
+    }
+    fmp4ServeSegment($fullVideoPath, $fmp4Idx, $segIdx);
 }
 
 // -------------------------------------------------------------

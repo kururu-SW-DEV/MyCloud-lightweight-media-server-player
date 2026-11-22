@@ -325,3 +325,13 @@
    - `api.php` 내부 CLI 모드(`--prefetch`)와 `flock -n hseg_prefetch.lock` 비차단 락을 결합해, NAS 전체에서 동시에 최대 1개의 프리페치 작업만 실행되도록 보장(CPU/RAM 누적 방지).
    - `hls_master` / `hls_manifest` 응답 시 `seg 0`을 백그라운드로 즉시 워밍업하고, `hls_seg`에서 `seg N`을 네트워크로 전송하는 동안 `seg N+1`을 병렬로 RAM 캐시(`hseg_v3_*`, 최대 5세그먼트 상한 및 60초 초과 `.tmp` 자동 정리)에 선행 생성.
    - 실기 아이폰 WAN 재생 로그에서 프리페치 적중 시 `2.7~2.8MB` 세그먼트 전체 응답 시간이 기존 `~2.5s`에서 **`0.92s ~ 0.97s`**로 단축됨을 확인.
+
+### Phase 24: 제로-`avconv` 순수 PHP 직접 MKV -> HLS v7 fMP4(CMAF) 리먹싱 엔진 구축 (2026-11-23)
+1. **외부 바이너리(`avconv`/`python`) 완전 배제 순수 PHP fMP4 리먹서 구현 (`fmp4_muxer.php`, `api.php`)**:
+   - MKV 내부의 H.264 `SimpleBlock` 페이로드가 MP4 AVCC 길이-접두 NAL 포맷과 동일하고, AAC 페이로드가 MP4 원시 프레임과 동일하며, `CodecPrivate`가 `avcC`/`esds`와 바이트 단위 호환된다는 점을 활용해 `avconv` 프로세스 실행 없이 PHP가 직접 MKV `CueClusterPosition`으로 `fseek()`하여 ISO 14496-12 CMAF `init.mp4` 및 `styp+moof+mdat`(`.m4s`) 세그먼트를 생성.
+   - `BlockGroup`(`0xA0`/`0xA1`), Xiph/Fixed/EBML Lacing, `Header Stripping`(`algo=3`), B-프레임(`trun` v1 부호 있는 `composition_time_offset`), 1024-샘플 그리드 정렬 AAC 타임스탬프(`gap=+0`)를 모두 지원하며, 제로카피 직스트리밍으로 3MB 문자열 재할당 및 임시 파일 쓰기를 완전 제거.
+   - `Cues` 파서에 인라인 `CuePoint` 파싱과 C-속도 `strpos` 비디오 트랙 사전 필터를 적용해 30개 이상 자막이 든 다국어 MKV의 초기 파싱 시간을 `4.17s -> 0.56s`(7.4배) 단축.
+   - 32-bit ARM PHP `fseek()` 한계(2GB 이상 파일) 또는 AC3/MP3/비표준 코덱 MKV에서는 기존 `avconv` MPEG-TS HLS v3 엔진으로 자동 무중단 폴백.
+2. **직접 미디어 플레이리스트(`#EXT-X-VERSION:7`) + Gzip 압축 + 2초 세그먼트 전면 전환 (`api.php`, `app.js`, `deploy_webplayer.py`)**:
+   - `app.js`에서 `hls_master` 단계를 생략하고 `hls_manifest`를 직접 호출해 초기 WAN 왕복 3회를 제거하고, 비-Range 요청 시 플레이리스트를 `gzencode` 압축(`171KB -> 2.9KB`, 59배 축소) 전송.
+   - 전 구간 2초 세그먼트 + fMP4 컨테이너 오버헤드 절감(MPEG-TS 8.5% -> fMP4 0.15%)으로 실측 세그먼트 서버 응답(TTFB) **`74ms ~ 129ms`(기존 대비 11~16배 가속)**, 9분 탐색 포함 전 경계 비디오/오디오 갭 **`+0`**, 임시 RAM 사용량 `24MB -> 128KB`(190배 절감), 하위 프로세스 `0개` 달성.

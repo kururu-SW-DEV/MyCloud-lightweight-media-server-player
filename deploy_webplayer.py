@@ -3917,6 +3917,11 @@ def main():
         print("[6] Writing api.php...")
         with sftp.open('/shares/webplayer/api.php', 'wb') as f:
             f.write(get_file_content('api.php', API_PHP))
+
+        fmp4_local = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'webplayer', 'fmp4_muxer.php')
+        if os.path.exists(fmp4_local):
+            print("[6b] Writing fmp4_muxer.php (Pure-PHP zero-copy HLS v7 fMP4 muxer)...")
+            sftp.put(fmp4_local, '/shares/webplayer/fmp4_muxer.php')
             
         print("[7] Writing index.html...")
         # Bump the ?v= cache-busting suffix on every deploy - a static version
