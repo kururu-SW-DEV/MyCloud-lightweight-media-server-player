@@ -335,3 +335,6 @@
 2. **직접 미디어 플레이리스트(`#EXT-X-VERSION:7`) + Gzip 압축 + 2초 세그먼트 전면 전환 (`api.php`, `app.js`, `deploy_webplayer.py`)**:
    - `app.js`에서 `hls_master` 단계를 생략하고 `hls_manifest`를 직접 호출해 초기 WAN 왕복 3회를 제거하고, 비-Range 요청 시 플레이리스트를 `gzencode` 압축(`171KB -> 2.9KB`, 59배 축소) 전송.
    - 전 구간 2초 세그먼트 + fMP4 컨테이너 오버헤드 절감(MPEG-TS 8.5% -> fMP4 0.15%)으로 실측 세그먼트 서버 응답(TTFB) **`74ms ~ 129ms`(기존 대비 11~16배 가속)**, 9분 탐색 포함 전 경계 비디오/오디오 갭 **`+0`**, 임시 RAM 사용량 `24MB -> 128KB`(190배 절감), 하위 프로세스 `0개` 달성.
+3. **iOS Safari CoreMedia fMP4 규격 완전 일치 보정 (`fmp4_muxer.php`, `app.js`)**:
+   - 실기 로그 분석 결과 iOS AVPlayer는 HLS v7 fMP4(`#EXT-X-MAP`)에서 Master Playlist(`#EXT-X-STREAM-INF:BANDWIDTH,CODECS`) 없이 미디어 플레이리스트를 직접 열 경우 세그먼트 0을 200KB 지점에서 반복 중단하는 현상을 확인하여 `app.js`에서 `hls_master` 진입을 복원(비용 55ms).
+   - FFmpeg Apple HLS fMP4 표준 레퍼런스와 1:1 일치하도록 `ftyp`(`iso5`/`iso6`/`mp41`), `avc1` 내 `pasp`(1:1), QuickTime/CoreMedia 4바이트 확장 길이 `esds`(`80 80 80 <len>`), 오디오 `tfhd`/`trex` `default_sample_flags=0x02000000`, IP-only 비디오 `trun v0(0x000305)`, `Content-Type: video/mp4`로 정렬하고 FFmpeg 9.0 라이브 HLS 디코드 0경고/0오류 검증 완료.

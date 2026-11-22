@@ -530,7 +530,8 @@ function fmp4BuildInitSegment($idx) {
     $w = intval($v['w']);
     $h = intval($v['h']);
 
-    $ftyp = fmp4Box('ftyp', 'isom' . pack('N', 512) . 'isomiso6cmfcmp41');
+    // Match Apple HLS Authoring Spec / FFmpeg fMP4 init segment (iso5/iso6/mp41)
+    $ftyp = fmp4Box('ftyp', 'iso5' . pack('N', 512) . 'iso5iso6mp41');
     $nextTrackId = $a ? 3 : 2;
     $mvhd = fmp4FullBox('mvhd', 0, 0,
         pack('NNNN', 0, 0, 1000, 0) .
@@ -553,11 +554,12 @@ function fmp4BuildInitSegment($idx) {
     $vHdlr = fmp4FullBox('hdlr', 0, 0, pack('N', 0) . 'vide' . pack('NNN', 0, 0, 0) . "VideoHandler\x00");
     $vVmhd = fmp4FullBox('vmhd', 0, 1, pack('nnnn', 0, 0, 0, 0));
     $avcC = fmp4Box('avcC', $vPriv);
+    $pasp = fmp4Box('pasp', pack('NN', 1, 1));
     $avc1 = fmp4Box('avc1',
         str_repeat("\x00", 6) . pack('n', 1) . str_repeat("\x00", 16) .
         pack('nnNN', $w, $h, 0x00480000, 0x00480000) .
         pack('Nn', 0, 1) . str_repeat("\x00", 32) . pack('nn', 0x0018, 0xFFFF) .
-        $avcC
+        $avcC . $pasp
     );
     $vStbl = fmp4Box('stbl',
         fmp4FullBox('stsd', 0, 0, pack('N', 1) . $avc1) .
@@ -569,7 +571,7 @@ function fmp4BuildInitSegment($idx) {
     $vTrak = fmp4Box('trak', $vTkhd . fmp4Box('mdia', $vMdhd . $vHdlr . fmp4Box('minf', $vVmhd . $dinf . $vStbl)));
 
     $aTrak = '';
-    $mvexBody = fmp4FullBox('trex', 0, 0, pack('NNNNN', 1, 1, 0, 0, 0));
+    $mvexBody = fmp4FullBox('trex', 0, 0, pack('NNNNN', 1, 1, 0, 0, 0x01010000));
     if ($a) {
         $sr = intval($a['sr']);
         $ch = intval($a['ch']);
@@ -583,10 +585,11 @@ function fmp4BuildInitSegment($idx) {
         $aMdhd = fmp4FullBox('mdhd', 0, 0, pack('NNNNnn', 0, 0, $sr, 0, 0x55C4, 0));
         $aHdlr = fmp4FullBox('hdlr', 0, 0, pack('N', 0) . 'soun' . pack('NNN', 0, 0, 0) . "SoundHandler\x00");
         $aSmhd = fmp4FullBox('smhd', 0, 0, pack('nn', 0, 0));
-        $decSpec = "\x05" . chr(strlen($asc)) . $asc;
-        $decCfg = "\x04" . chr(13 + strlen($decSpec)) . "\x40\x15\x00\x00\x00" . pack('NN', 128000, 128000) . $decSpec;
-        $slCfg = "\x06\x01\x02";
-        $esDesc = "\x03" . chr(3 + strlen($decCfg) + strlen($slCfg)) . pack('n', 2) . "\x00" . $decCfg . $slCfg;
+        // Canonical Apple QuickTime / CoreMedia 4-byte descriptor lengths (80 80 80 <len>)
+        $decSpec = "\x05\x80\x80\x80" . chr(strlen($asc)) . $asc;
+        $decCfg = "\x04\x80\x80\x80" . chr(13 + strlen($decSpec)) . "\x40\x15\x00\x00\x00" . pack('NN', 128000, 128000) . $decSpec;
+        $slCfg = "\x06\x80\x80\x80\x01\x02";
+        $esDesc = "\x03\x80\x80\x80" . chr(3 + strlen($decCfg) + strlen($slCfg)) . pack('n', 2) . "\x00" . $decCfg . $slCfg;
         $esds = fmp4FullBox('esds', 0, 0, $esDesc);
         $mp4a = fmp4Box('mp4a',
             str_repeat("\x00", 6) . pack('n', 1) . str_repeat("\x00", 8) .
@@ -601,7 +604,7 @@ function fmp4BuildInitSegment($idx) {
             fmp4FullBox('stco', 0, 0, pack('N', 0))
         );
         $aTrak = fmp4Box('trak', $aTkhd . fmp4Box('mdia', $aMdhd . $aHdlr . fmp4Box('minf', $aSmhd . $dinf . $aStbl)));
-        $mvexBody .= fmp4FullBox('trex', 0, 0, pack('NNNNN', 2, 1, 0, 0, 0));
+        $mvexBody .= fmp4FullBox('trex', 0, 0, pack('NNNNN', 2, 1, 1024, 0, 0x02000000));
     }
 
     $mvex = fmp4Box('mvex', $mvexBody);
@@ -820,7 +823,9 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
     $vDefDur = ($v['defdur'] > 0) ? (int)round(((float)$v['defdur']) * 90.0 / 1000000.0) : 3754;
     $nextSegTick = round(((float)$seg['start'] + (float)$seg['dur']) * 90000.0);
 
-    $vTrunParts = array();
+    $hasBFrames = false;
+    $vDurs = array();
+    $vCtos = array();
     for ($i = 0; $i < $vc; $i++) {
         $dts = round($vPtsSorted[$i] * 90.0);
         if ($i + 1 < $vc) {
@@ -830,12 +835,32 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
             $dur = ($tail > 0 && $tail < $vDefDur * 3) ? $tail : $vDefDur;
         }
         $cto = (int)round($vMeta[$i][0] * 90.0 - $dts);
-        $sflags = $vMeta[$i][1] ? 0x02000000 : 0x01010000;
-        $vTrunParts[] = pack('NNNN', $dur, $vStripLen + $vMeta[$i][3], $sflags, $cto);
+        if ($cto !== 0) $hasBFrames = true;
+        $vDurs[] = $dur;
+        $vCtos[] = $cto;
+    }
+
+    $vTrunParts = array();
+    if ($hasBFrames) {
+        for ($i = 0; $i < $vc; $i++) {
+            $sflags = $vMeta[$i][1] ? 0x02000000 : 0x01010000;
+            $vTrunParts[] = pack('NNNN', $vDurs[$i], $vStripLen + $vMeta[$i][3], $sflags, $vCtos[$i]);
+        }
+        $vTrunVer = 1;
+        $vTrunFlags = 0x000F01;
+        $vTrunPrefixTail = '';
+    } else {
+        // Match FFmpeg Apple HLS fMP4: trun v0 flags=0x000305 (first_sample_flags=0x02000000, default=0x01010000)
+        for ($i = 0; $i < $vc; $i++) {
+            $vTrunParts[] = pack('NN', $vDurs[$i], $vStripLen + $vMeta[$i][3]);
+        }
+        $vTrunVer = 0;
+        $vTrunFlags = 0x000305;
+        $vTrunPrefixTail = pack('N', 0x02000000);
     }
     $vTrunEntries = implode('', $vTrunParts);
 
-    // Audio trun (timescale = sample_rate, snapped to exact 1024-sample grid for seamless boundaries)
+    // Audio trun (timescale = sample_rate, snapped to exact 1024-sample grid, default_sample_flags=0x02000000)
     $ac = count($aMeta);
     $aTrunEntries = '';
     $aBaseDts = 0.0;
@@ -844,22 +869,22 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
         $aBaseDts = max(0.0, round(($aMeta[0][0] * ($sr / 1000.0)) / 1024.0) * 1024.0);
         $aTrunParts = array();
         for ($i = 0; $i < $ac; $i++) {
-            $aTrunParts[] = pack('NN', 1024, $aStripLen + $aMeta[$i][2]);
+            $aTrunParts[] = pack('N', $aStripLen + $aMeta[$i][2]);
         }
         $aTrunEntries = implode('', $aTrunParts);
     }
 
     $mfhd = fmp4FullBox('mfhd', 0, 0, pack('N', $segIdx + 1));
-    $vTfhd = fmp4FullBox('tfhd', 0, 0x020000, pack('N', 1));
+    $vTfhd = fmp4FullBox('tfhd', 0, 0x020020, pack('NN', 1, 0x01010000));
     $vTfdt = fmp4FullBox('tfdt', 1, 0, fmp4PackUint64($vBaseDts));
-    $vTrunPlaceholder = fmp4FullBox('trun', 1, 0x000F01, pack('NN', $vc, 0) . $vTrunEntries);
+    $vTrunPlaceholder = fmp4FullBox('trun', $vTrunVer, $vTrunFlags, pack('NN', $vc, 0) . $vTrunPrefixTail . $vTrunEntries);
     $vTrafLen = 8 + strlen($vTfhd) + strlen($vTfdt) + strlen($vTrunPlaceholder);
 
     $aTrafLen = 0;
     if ($a && $ac > 0) {
-        $aTfhd = fmp4FullBox('tfhd', 0, 0x020000, pack('N', 2));
+        $aTfhd = fmp4FullBox('tfhd', 0, 0x020028, pack('NNN', 2, 1024, 0x02000000));
         $aTfdt = fmp4FullBox('tfdt', 1, 0, fmp4PackUint64($aBaseDts));
-        $aTrunPlaceholder = fmp4FullBox('trun', 0, 0x000301, pack('NN', $ac, 0) . $aTrunEntries);
+        $aTrunPlaceholder = fmp4FullBox('trun', 0, 0x000201, pack('NN', $ac, 0) . $aTrunEntries);
         $aTrafLen = 8 + strlen($aTfhd) + strlen($aTfdt) + strlen($aTrunPlaceholder);
     }
 
@@ -867,11 +892,11 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
     $vDataOff = $moofSize + 8;
     $aDataOff = $moofSize + 8 + $vMdatLen;
 
-    $vTrun = fmp4FullBox('trun', 1, 0x000F01, pack('NN', $vc, $vDataOff) . $vTrunEntries);
+    $vTrun = fmp4FullBox('trun', $vTrunVer, $vTrunFlags, pack('NN', $vc, $vDataOff) . $vTrunPrefixTail . $vTrunEntries);
     $vTraf = fmp4Box('traf', $vTfhd . $vTfdt . $vTrun);
     $aTraf = '';
     if ($a && $ac > 0) {
-        $aTrun = fmp4FullBox('trun', 0, 0x000301, pack('NN', $ac, $aDataOff) . $aTrunEntries);
+        $aTrun = fmp4FullBox('trun', 0, 0x000201, pack('NN', $ac, $aDataOff) . $aTrunEntries);
         $aTraf = fmp4Box('traf', $aTfhd . $aTfdt . $aTrun);
     }
 
@@ -885,7 +910,7 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
     @ini_set('zlib.output_compression', '0');
     while (ob_get_level()) @ob_end_clean();
 
-    header('Content-Type: video/iso.segment');
+    header('Content-Type: video/mp4');
     header('Accept-Ranges: bytes');
     header('Cache-Control: private, max-age=300');
 

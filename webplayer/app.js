@@ -1214,7 +1214,7 @@ async function attachVideoSource(video, useHls, resumeTime = 0) {
         return;
     }
 
-    const hlsUrl = `api.php?action=hls_manifest&video=${encodeURIComponent(video.rel_path)}&ext=.m3u8`;
+    const hlsUrl = `api.php?action=hls_master&video=${encodeURIComponent(video.rel_path)}&ext=.m3u8`;
     const nativeHls = videoPlayer.canPlayType('application/vnd.apple.mpegurl');
     if (nativeHls === 'probably' || nativeHls === 'maybe') {
         videoPlayer.preload = 'auto';
