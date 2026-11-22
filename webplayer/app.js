@@ -2538,11 +2538,19 @@ if (videoPlayer) {
     videoPlayer.addEventListener('ratechange', updateMediaSessionPosition);
     videoPlayer.addEventListener('loadedmetadata', updateMediaSessionPosition);
     
-    // Toggle play/pause by clicking directly on video element (desktop only;
-    // on iOS/touch devices native <video controls> already handles taps).
+    // Note: Chrome, Edge, and Firefox <video controls> already toggle play/pause
+    // natively as the default action of clicking the video surface. Adding a second
+    // JS click listener on those browsers causes a double-toggle (JS pause() ->
+    // native default action play() within 1ms), preventing the video from pausing!
+    // Only desktop Safari lacks native canvas click-to-toggle on <video controls>.
     videoPlayer.addEventListener('click', (e) => {
         if (e.target !== videoPlayer) return;
-        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) return;
+        const ua = navigator.userAgent || '';
+        const isDesktopSafari = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(ua) && !isIOSDevice();
+        if (!isDesktopSafari) return;
+        const rect = videoPlayer.getBoundingClientRect();
+        if (rect.height > 80 && (e.clientY - rect.top) > rect.height - 48) return;
+        e.preventDefault();
         if (videoPlayer.paused) {
             videoPlayer.play().catch(() => {});
         } else {
