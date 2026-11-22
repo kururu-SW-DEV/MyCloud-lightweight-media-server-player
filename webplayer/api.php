@@ -735,7 +735,7 @@ function parseClockTimeToSec($str) {
     return $h * 3600.0 + $min * 60.0 + $sec + ((int)$msStr) / 1000.0;
 }
 
-function convertSubContentToVtt($rawBytes, $ext, $mpegtsOffset = 0, $syncOffset = 0.0) {
+function convertSubContentToVtt($rawBytes, $ext, $mpegtsOffset = -1, $syncOffset = 0.0) {
     $text = decodeSubtitleToUtf8($rawBytes);
     $ext = strtolower($ext);
     $cues = array(); // each: array(start, end, text)
@@ -834,16 +834,22 @@ function convertSubContentToVtt($rawBytes, $ext, $mpegtsOffset = 0, $syncOffset 
     });
 
     $vtt = "WEBVTT\n";
-    if ($mpegtsOffset > 0) {
-        $vtt .= "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:" . intval($mpegtsOffset) . "\n";
+    if ($mpegtsOffset >= 0) {
+        $vtt .= "X-TIMESTAMP-MAP=MPEGTS:" . intval($mpegtsOffset) . ",LOCAL:00:00:00.000\n";
     }
     $vtt .= "\n";
 
     $cueIdx = 1;
+    $seenCue = array();
     foreach ($cues as $c) {
         $st = max(0.0, $c[0] + $syncOffset);
         $en = max($st + 0.1, $c[1] + $syncOffset);
-        $vtt .= $cueIdx . "\n" . formatVttTimestamp($st) . " --> " . formatVttTimestamp($en) . "\n" . $c[2] . "\n\n";
+        $tsStart = formatVttTimestamp($st);
+        $tsEnd = formatVttTimestamp($en);
+        $dedupKey = $tsStart . '|' . $tsEnd . '|' . $c[2];
+        if (isset($seenCue[$dedupKey])) continue;
+        $seenCue[$dedupKey] = true;
+        $vtt .= $cueIdx . "\n" . $tsStart . " --> " . $tsEnd . "\n" . $c[2] . "\n\n";
         $cueIdx++;
     }
     return $vtt;
@@ -1084,7 +1090,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_sub_m3u8') {
             header('HTTP/1.1 400 Bad Request');
             exit;
         }
-        $vttUrl = 'api.php?action=hls_sub_vtt&src=ext&sub=' . rawurlencode($subRel) . '&ts=' . $tsFlag . '&ext=.vtt';
+        $vttUrl = 'api.php?action=hls_sub_vtt&hls=1&src=ext&sub=' . rawurlencode($subRel) . '&ts=' . $tsFlag . '&ext=.vtt';
     } elseif ($src === 'emb') {
         $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
         $stream = isset($_GET['stream']) ? intval($_GET['stream']) : -1;
@@ -1093,17 +1099,19 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_sub_m3u8') {
             header('HTTP/1.1 400 Bad Request');
             exit;
         }
-        $vttUrl = 'api.php?action=hls_sub_vtt&src=emb&video=' . rawurlencode($videoRel) . '&stream=' . $stream . '&codec=' . rawurlencode($codec) . '&ts=' . $tsFlag . '&ext=.vtt';
+        $vttUrl = 'api.php?action=hls_sub_vtt&hls=1&src=emb&video=' . rawurlencode($videoRel) . '&stream=' . $stream . '&codec=' . rawurlencode($codec) . '&ts=' . $tsFlag . '&ext=.vtt';
     } else {
         header('HTTP/1.1 400 Bad Request');
         exit;
     }
     $targetDur = (int)ceil($dur);
+    $hlsVer = ($tsFlag === '1') ? '3' : '7';
     $body = "#EXTM3U\n"
-        . "#EXT-X-VERSION:3\n"
+        . "#EXT-X-VERSION:" . $hlsVer . "\n"
         . "#EXT-X-TARGETDURATION:" . $targetDur . "\n"
         . "#EXT-X-MEDIA-SEQUENCE:0\n"
         . "#EXT-X-PLAYLIST-TYPE:VOD\n"
+        . "#EXT-X-INDEPENDENT-SEGMENTS\n"
         . sprintf("#EXTINF:%.3f,\n", $dur)
         . $vttUrl . "\n"
         . "#EXT-X-ENDLIST\n";
@@ -1116,7 +1124,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_sub_m3u8') {
 // -------------------------------------------------------------
 if (isset($_GET['action']) && $_GET['action'] === 'hls_sub_vtt') {
     $src = isset($_GET['src']) ? $_GET['src'] : '';
-    $mpegtsOffset = (!empty($_GET['ts']) && $_GET['ts'] == '1') ? 126000 : 0; // 1.400s * 90kHz for MPEG-TS fallback
+    $isHlsVtt = (!empty($_GET['hls']) && $_GET['hls'] == '1');
+    // RFC 8216 §3.5: HLS WebVTT segments require X-TIMESTAMP-MAP (MPEGTS:0 for fMP4, 126000 for MPEG-TS 1.4s).
+    // Plain HTML5 <track> (non-HLS) omits X-TIMESTAMP-MAP (-1).
+    $mpegtsOffset = $isHlsVtt ? ((!empty($_GET['ts']) && $_GET['ts'] == '1') ? 126000 : 0) : -1;
     $syncOffset = isset($_GET['offset']) ? max(-60.0, min(60.0, (float)$_GET['offset'])) : 0.0;
     $tmpDir = '/tmp/webplayer_sub_ram';
     if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
@@ -1142,7 +1153,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_sub_vtt') {
             header('HTTP/1.1 403 Forbidden');
             exit;
         }
-        $vttCache = $tmpDir . '/vtt_ext_' . md5($fullSubPath . ':' . @filemtime($fullSubPath) . ':' . $mpegtsOffset . ':' . sprintf('%.2f', $syncOffset)) . '.vtt';
+        $vttCache = $tmpDir . '/vtt2_ext_' . md5($fullSubPath . ':' . @filemtime($fullSubPath) . ':' . $mpegtsOffset . ':' . sprintf('%.2f', $syncOffset)) . '.vtt';
         if (file_exists($vttCache) && filesize($vttCache) > 0) {
             $vtt = @file_get_contents($vttCache);
         } else {
@@ -1169,7 +1180,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_sub_vtt') {
             header('HTTP/1.1 404 Not Found');
             exit;
         }
-        $vttCache = $tmpDir . '/vtt_emb_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath) . ':' . $stream . ':' . $mpegtsOffset . ':' . sprintf('%.2f', $syncOffset)) . '.vtt';
+        $vttCache = $tmpDir . '/vtt2_emb_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath) . ':' . $stream . ':' . $mpegtsOffset . ':' . sprintf('%.2f', $syncOffset)) . '.vtt';
         if (file_exists($vttCache) && filesize($vttCache) > 0) {
             $vtt = @file_get_contents($vttCache);
         } else {
@@ -1188,7 +1199,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_sub_vtt') {
             @file_put_contents($vttCache, $vtt);
         }
         // Prune vtt cache to max 20 files
-        $vttFiles = @glob($tmpDir . '/vtt_*.vtt');
+        $vttFiles = @glob($tmpDir . '/vtt*.vtt');
         if ($vttFiles && count($vttFiles) > 20) {
             usort($vttFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
             while (count($vttFiles) > 15) {

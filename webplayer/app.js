@@ -562,15 +562,27 @@ function getWebPlayerTrack() {
     return null;
 }
 
+function useIOSNativeCaptions() {
+    if (!isIOSDevice()) return false;
+    const isLocalCustom = activeSubtitleTrackInfo && activeSubtitleTrackInfo.type === 'external' && !activeSubtitleTrackInfo.subRel;
+    if (isLocalCustom) return false;
+    if (isHlsRemuxActive) {
+        return getNativeHlsSubtitleTracks().length > 0 && subtitleOffset === 0;
+    }
+    return !!(activeSubtitleTrackInfo && activeSubtitleTrackInfo.type === 'external' && activeSubtitleTrackInfo.subRel);
+}
+
 function syncNativeFullscreenTracks(forceFullscreen = false) {
     if (!videoPlayer || !videoPlayer.textTracks) return;
     const isFs = forceFullscreen || isFullscreen();
     const wpTrack = getWebPlayerTrack();
     const hlsTracks = getNativeHlsSubtitleTracks();
+    const iosNativeMode = useIOSNativeCaptions();
+    const wantShowNative = isFs || iosNativeMode;
 
-    if (!isFs) {
-        // Windowed mode: suppress ALL native browser captions so our custom DOM
-        // subtitle overlay renders cleanly with zero double subtitles.
+    if (!wantShowNative) {
+        // Desktop/Android windowed mode: suppress ALL native browser captions so our
+        // custom DOM subtitle overlay renders cleanly with zero double subtitles.
         if (wpTrack) wpTrack.mode = 'hidden';
         for (let i = 0; i < hlsTracks.length; i++) {
             hlsTracks[i].mode = 'disabled';
@@ -578,8 +590,9 @@ function syncNativeFullscreenTracks(forceFullscreen = false) {
         return;
     }
 
-    // Native fullscreen mode:
-    const subTurnedOff = subSelect && subSelect.value === '' && parsedSubtitles.length === 0;
+    // Native caption mode (fullscreen on all devices, OR iOS inline+fullscreen so
+    // AVPlayer fetches #EXT-X-MEDIA:TYPE=SUBTITLES BEFORE entering AVPlayerViewController!):
+    const subTurnedOff = userManuallySelectedSubtitle && subSelect && subSelect.value === '' && parsedSubtitles.length === 0;
     if (subTurnedOff) {
         if (wpTrack) wpTrack.mode = 'hidden';
         for (let i = 0; i < hlsTracks.length; i++) {
@@ -588,8 +601,6 @@ function syncNativeFullscreenTracks(forceFullscreen = false) {
         return;
     }
 
-    // When native HLS subtitle tracks exist (injected via #EXT-X-MEDIA:TYPE=SUBTITLES
-    // for iOS AVPlayerViewController), activate the matching native HLS track!
     if (hlsTracks.length > 0) {
         if (wpTrack) wpTrack.mode = 'hidden';
         let targetIdx = 0;
@@ -636,17 +647,15 @@ function syncCuesToTextTrack() {
         currentVttBlobUrl = null;
     }
 
-    if (parsedSubtitles.length === 0) {
+    // On iOS Safari playing native HLS, ALWAYS defer to hls_master's native
+    // #EXT-X-MEDIA:TYPE=SUBTITLES tracks (never attach a duplicate HTML <track>).
+    if (isIOSDevice() && isHlsRemuxActive) {
         trackEl.removeAttribute('src');
         syncNativeFullscreenTracks(false);
         return;
     }
 
-    // On iOS Safari playing native HLS, AVPlayerViewController uses the native
-    // #EXT-X-MEDIA:TYPE=SUBTITLES tracks from hls_master (blob: tracks are ignored
-    // by AVPlayer and can cause duplicate/empty track entries in iOS CC menu).
-    const nativeHlsTracks = getNativeHlsSubtitleTracks();
-    if (isIOSDevice() && isHlsRemuxActive && nativeHlsTracks.length > 0) {
+    if (parsedSubtitles.length === 0) {
         trackEl.removeAttribute('src');
         syncNativeFullscreenTracks(false);
         return;
@@ -670,7 +679,7 @@ function syncCuesToTextTrack() {
 function handleFullscreenSubtitleSync() {
     const isFs = isFullscreen();
     syncNativeFullscreenTracks(isFs);
-    if (isFs) {
+    if (isFs || useIOSNativeCaptions()) {
         if (subtitleBox) subtitleBox.style.display = "none";
     } else {
         updateSubtitleDisplay();
@@ -729,10 +738,10 @@ let lastDisplayedPosTop = null;
 function updateSubtitleDisplay() {
     if (!subtitleBox) return;
 
-    // In fullscreen we show the native WebVTT track instead (see
-    // handleFullscreenSubtitleSync) - don't also render the custom overlay
-    // on top of it.
-    if (isFullscreen()) {
+    // In fullscreen (or on iOS where native WebVTT captions stay active so
+    // AVPlayerViewController preserves them on fullscreen entry), hide the DOM
+    // overlay to avoid double subtitles.
+    if (isFullscreen() || useIOSNativeCaptions()) {
         if (subtitleBox.style.display !== 'none') subtitleBox.style.display = 'none';
         return;
     }

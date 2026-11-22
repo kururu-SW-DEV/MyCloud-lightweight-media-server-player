@@ -347,3 +347,7 @@
    - iOS `AVPlayerViewController`는 네이티브 전체화면 전환 시 브라우저 메모리의 `blob:` `<track>`을 읽지 못하므로, `api.php`에 서버측 UTF-8 WebVTT 변환기(`decodeSubtitleToUtf8` + `convertSubContentToVtt`, UTF-16/CP949/UTF-8 자동 디코딩 및 SMI/SRT/ASS/VTT 지원)와 `hls_sub_m3u8` / `hls_sub_vtt` 엔드포인트를 구현.
    - `hls_master`에 외부 매칭 자막(한국어 우선 `DEFAULT=YES`)과 내장 MKV 자막을 `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs"`로 자동 삽입하여, Safari 자체 플레이어 전체화면·iOS 네이티브 CC 메뉴·AirPlay에서도 자막이 그대로 표시되도록 구현.
    - 일반 `.mp4` 직접 재생 시에도 iOS에서는 `blob:` 대신 HTTP `hls_sub_vtt` URL을 `<track>`에 연결하고, 창모드에서는 네이티브 트랙을 비활성화(`disabled`)해 커스텀 DOM 자막과의 이중 표시를 원천 차단.
+3. **iOS `AVPlayer` 네이티브 자막 프리로드 유지 및 RFC 8216 `X-TIMESTAMP-MAP` 보정 (`api.php`, `app.js`)**:
+   - 실기 로그 분석 결과 창모드에서 `hlsTracks[i].mode = 'disabled'`를 호출하면 `AVPlayer`가 `hls_sub_m3u8` 수신 자체를 취소하고 전체화면 진입 후 `webkitbeginfullscreen` 내 JS 재활성화를 무시하는 iOS WebKit 특성을 확인.
+   - iOS Safari에서는 재생 시작 시점부터 네이티브 HLS 자막 트랙을 `showing`으로 유지(`useIOSNativeCaptions()`)하고 커스텀 DOM 오버레이를 숨겨 이중 자막 없이 전체화면 진입 즉시 자막이 유지되도록 수정.
+   - HLS WebVTT 헤더에 RFC 8216 §3.5 필수 `X-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000`(fMP4) / `MPEGTS:126000`(MPEG-TS) 및 `hls_sub_m3u8` `#EXT-X-VERSION:7` + `#EXT-X-INDEPENDENT-SEGMENTS`, 동일 시점 중복 ASS 큐 제거 추가.
