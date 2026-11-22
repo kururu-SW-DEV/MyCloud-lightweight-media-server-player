@@ -601,17 +601,25 @@ function syncNativeFullscreenTracks(forceFullscreen = false) {
         return;
     }
 
-    if (hlsTracks.length > 0) {
+    const isLocalCustom = !!(activeSubtitleTrackInfo && activeSubtitleTrackInfo.type === 'external' && !activeSubtitleTrackInfo.subRel);
+    if (hlsTracks.length > 0 && !isLocalCustom) {
         if (wpTrack) wpTrack.mode = 'hidden';
         let targetIdx = 0;
         if (activeSubtitleTrackInfo) {
             const wantExt = activeSubtitleTrackInfo.type === 'external';
+            const wantExtUpper = (activeSubtitleTrackInfo.ext || '').toUpperCase();
+            const wantExtRank = typeof activeSubtitleTrackInfo.extRank === 'number' ? activeSubtitleTrackInfo.extRank : 0;
             const wantLabel = (activeSubtitleTrackInfo.label || '').toLowerCase();
+            let extSeen = 0;
             for (let i = 0; i < hlsTracks.length; i++) {
                 const tl = (hlsTracks[i].label || '').toLowerCase();
                 if (wantExt && tl.includes('외부')) {
+                    if (extSeen === wantExtRank || (wantExtUpper && tl.includes(wantExtUpper.toLowerCase()) && extSeen === wantExtRank)) {
+                        targetIdx = i;
+                        break;
+                    }
                     targetIdx = i;
-                    break;
+                    extSeen++;
                 }
                 if (!wantExt && wantLabel && (tl === wantLabel || tl.includes(wantLabel) || wantLabel.includes(tl))) {
                     targetIdx = i;
@@ -622,8 +630,11 @@ function syncNativeFullscreenTracks(forceFullscreen = false) {
         for (let i = 0; i < hlsTracks.length; i++) {
             hlsTracks[i].mode = (i === targetIdx) ? 'showing' : 'disabled';
         }
-    } else if (wpTrack) {
-        wpTrack.mode = 'showing';
+    } else {
+        for (let i = 0; i < hlsTracks.length; i++) {
+            hlsTracks[i].mode = 'disabled';
+        }
+        if (wpTrack) wpTrack.mode = 'showing';
     }
 }
 
@@ -1326,11 +1337,18 @@ async function attachVideoSource(video, useHls, resumeTime = 0) {
         if (resumeTime > 0) {
             const onMeta = () => {
                 videoPlayer.removeEventListener('loadedmetadata', onMeta);
+                if (activeNativeMetaHandler === onMeta) activeNativeMetaHandler = null;
+                if (activeVideo !== video) return;
                 try { videoPlayer.currentTime = resumeTime; } catch (e) {}
             };
+            activeNativeMetaHandler = onMeta;
             videoPlayer.addEventListener('loadedmetadata', onMeta);
         }
         videoPlayer.play().catch(() => {});
+        if (activeSubtitleTrackInfo) {
+            syncCuesToTextTrack();
+            handleFullscreenSubtitleSync();
+        }
         return;
     }
 
@@ -1433,15 +1451,20 @@ window.openPlayer = async function(encodedRelPath) {
     // 1. Add external subtitles to list
     currentAvailableTracks = [];
     if (video.subtitles && video.subtitles.length > 0) {
-        video.subtitles.forEach(s => {
+        video.subtitles.forEach((s, extIdx) => {
             const subRel = (video.folder ? `${video.folder}/` : '') + s.filename;
+            const lowName = (s.filename || '').toLowerCase();
+            let extLang = 'ko';
+            if (lowName.includes('.en.') || lowName.includes('_en.') || lowName.includes('.eng.')) extLang = 'en';
+            else if (lowName.includes('.jp.') || lowName.includes('.jpn.') || lowName.includes('.ja.')) extLang = 'ja';
             currentAvailableTracks.push({
                 type: 'external',
                 label: `[외부-${s.ext.toUpperCase()}] ${s.filename}`,
                 url: s.url,
                 subRel: subRel,
                 ext: s.ext,
-                lang: s.ext
+                extRank: extIdx,
+                lang: extLang
             });
         });
     }
@@ -1571,6 +1594,11 @@ async function loadSelectedTrack(track) {
     clearSubtitles();
     if (!track) return;
     activeSubtitleTrackInfo = track;
+    // On iOS native HLS, switch the active native caption track immediately without
+    // waiting for JS subtitle fetch/parse to finish.
+    if (useIOSNativeCaptions()) {
+        handleFullscreenSubtitleSync();
+    }
     // Snapshot which video this load was requested for. loadSelectedTrack is
     // async (and the cache branch below can still interleave with a fast
     // prev/next click via microtask ordering) - without this check, a track
@@ -2153,15 +2181,8 @@ function closePlayer() {
 closePlayerBtn.addEventListener('click', closePlayer);
 
 document.addEventListener('keydown', (e) => {
-    // Guard against firing shortcuts while typing in input fields
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) {
-        if (e.key === 'Escape') {
-            e.target.blur();
-        }
-        return;
-    }
-    // Suppress player hotkeys when typing in search input or dropdowns (Item 20)
-    if (e.target && typeof e.target.matches === 'function' && e.target.matches('input, select, textarea') || (e.target && e.target.isContentEditable)) {
+    // Suppress player hotkeys when typing in search input, textareas, or dropdowns
+    if (e.target && ((typeof e.target.matches === 'function' && e.target.matches('input, select, textarea')) || e.target.isContentEditable)) {
         if (e.key === 'Escape') e.target.blur();
         return;
     }

@@ -915,14 +915,37 @@ def probe_hls_info(video_path):
                 scale_sec = timecode_scale / 1000000000.0
                 last_vt = -1.0
                 last_at = -1.0
+                # C-speed skip-ahead for multi-subtitle MKVs (60+ subtitle tracks can have 20k+ CuePoints)
+                v_track_sig = None
+                if video_track_num is not None:
+                    if video_track_num < 128:
+                        v_track_sig = b'\xf7\x81' + struct.pack('>B', video_track_num)
+                    elif video_track_num < 65536:
+                        v_track_sig = b'\xf7\x82' + struct.pack('>H', video_track_num)
                 while cp < clen:
-                    ceid, cel = read_id(cues_data, cp)
-                    if ceid is None: break
-                    cesz, cesl = read_vint(cues_data, cp + cel)
-                    if cesz is None: break
-                    cend = cp + cel + cesl + cesz
-                    if ceid == 0xBB:
-                        ip = cp + cel + cesl
+                    b0 = ord(cues_data[cp])
+                    if b0 == 0xBB:
+                        cp += 1
+                        if cp >= clen: break
+                        vb = ord(cues_data[cp])
+                        if vb >= 0x80:
+                            cesz = vb & 0x7F
+                            cp += 1
+                        elif vb >= 0x40 and cp + 1 < clen:
+                            cesz = ((vb & 0x3F) << 8) | ord(cues_data[cp + 1])
+                            cp += 2
+                        else:
+                            cesz, cesl = read_vint(cues_data, cp)
+                            if cesz is None: break
+                            cp += cesl
+                        cbody = cp
+                        cend = min(clen, cbody + cesz)
+                        cp = cend
+                        if v_track_sig is not None:
+                            hit = cues_data.find(v_track_sig, cbody, cend)
+                            if hit == -1:
+                                continue
+                        ip = cbody
                         c_time = None
                         has_video_track = False
                         saw_any_track = False
@@ -938,7 +961,7 @@ def probe_hls_info(video_path):
                                 c_time = v * scale_sec
                             elif ieid == 0xB7:
                                 tp = ivpos
-                                tend = ivpos + iesz
+                                tend = min(cend, ivpos + iesz)
                                 while tp < tend:
                                     teid, tel = read_id(cues_data, tp)
                                     if teid is None: break
@@ -960,7 +983,12 @@ def probe_hls_info(video_path):
                             if (has_video_track or not saw_any_track) and c_time > last_vt + 0.001:
                                 kf_times.append(c_time)
                                 last_vt = c_time
-                    cp = cend
+                    else:
+                        ceid, cel = read_id(cues_data, cp)
+                        if ceid is None: break
+                        cesz, cesl = read_vint(cues_data, cp + cel)
+                        if cesz is None: break
+                        cp = min(clen, cp + cel + cesl + cesz)
         f.close()
 
         if len(kf_times) < 2 and len(all_cue_times) >= 2:

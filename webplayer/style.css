@@ -143,11 +143,6 @@ body {
     border-color: rgba(56, 189, 248, 0.4);
     color: var(--accent);
 }
-.btn-explorer-nav:hover {
-    background: rgba(56, 189, 248, 0.15);
-    border-color: rgba(56, 189, 248, 0.4);
-    color: var(--accent);
-}
 .btn-explorer-nav svg {
     flex-shrink: 0;
 }

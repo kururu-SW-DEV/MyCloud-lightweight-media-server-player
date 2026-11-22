@@ -77,6 +77,27 @@ function fmp4PackUint64($val) {
     return pack('NN', $hi, $lo);
 }
 
+// 32-bit PHP float-safe end offset clamp (prevents int32 wrap on unknown-size EBML 0x01FFFFFFFFFFFFFF)
+function fmp4ClampEnd($vpos, $esz, $limit) {
+    $limF = (float)$limit;
+    if ($esz < 0.0 || $esz >= $limF) return (int)$limit;
+    $endF = (float)$vpos + (float)$esz;
+    return ($endF >= $limF) ? (int)$limit : (int)$endF;
+}
+
+// Guaranteed full read loop for local file spans > 8KB
+function fmp4ReadExact($fp, $len) {
+    $buf = '';
+    $rem = (int)$len;
+    while ($rem > 0 && !feof($fp)) {
+        $chunk = fread($fp, $rem);
+        if ($chunk === false || $chunk === '') break;
+        $buf .= $chunk;
+        $rem -= strlen($chunk);
+    }
+    return $buf;
+}
+
 function fmp4GetIndex($fullVideoPath) {
     // 32-bit ARM PHP fseek() supports offsets up to 2,147,483,647 bytes (~2GB).
     // For >= 2GB files, fall back cleanly to 64-bit LFS avconv MPEG-TS remuxing.
@@ -115,6 +136,8 @@ function fmp4GetIndex($fullVideoPath) {
 
     $tracksOff = null;
     $cuesOff = null;
+    $infoOff = null;
+    $sawInfo = false;
     $tcScale = 1000000.0;
     $durRaw = 0.0;
 
@@ -125,13 +148,13 @@ function fmp4GetIndex($fullVideoPath) {
         list($esz, $esl) = fmp4EbmlReadVint($hdr, $p + $el, $hlen);
         if ($esz === null) break;
         $vpos = $p + $el + $esl;
-        $end = $vpos + (int)$esz;
+        $end = fmp4ClampEnd($vpos, $esz, $hlen);
         if ($eid === 0x1F43B675) break; // Cluster reached
         if ($eid === 0x1654AE6B) {
             $tracksOff = (float)($p - $segDataStart);
         } elseif ($eid === 0x1C53BB6B) {
             $cuesOff = (float)($p - $segDataStart);
-        } elseif ($eid === 0x114D9B74 && $end <= $hlen) {
+        } elseif ($eid === 0x114D9B74 && ($vpos + $esz) <= (float)$hlen) {
             $sp = $vpos;
             while ($sp < $end) {
                 list($se, $sel) = fmp4EbmlReadId($hdr, $sp, $end);
@@ -139,7 +162,7 @@ function fmp4GetIndex($fullVideoPath) {
                 list($ss, $ssl) = fmp4EbmlReadVint($hdr, $sp + $sel, $end);
                 if ($ss === null) break;
                 $sv = $sp + $sel + $ssl;
-                $send = $sv + (int)$ss;
+                $send = fmp4ClampEnd($sv, $ss, $end);
                 if ($se === 0x4DBB) {
                     $ip = $sv;
                     $sid = null;
@@ -152,14 +175,16 @@ function fmp4GetIndex($fullVideoPath) {
                         $iv = $ip + $il + $isl;
                         if ($ie === 0x53AB) $sid = (int)fmp4EbmlReadUint($hdr, $iv, (int)$is);
                         elseif ($ie === 0x53AC) $spos = fmp4EbmlReadUint($hdr, $iv, (int)$is);
-                        $ip = $iv + (int)$is;
+                        $ip = fmp4ClampEnd($iv, $is, $send);
                     }
                     if ($sid === 0x1654AE6B && $spos !== null) $tracksOff = $spos;
                     elseif ($sid === 0x1C53BB6B && $spos !== null) $cuesOff = $spos;
+                    elseif ($sid === 0x1549A966 && $spos !== null) $infoOff = $spos;
                 }
                 $sp = $send;
             }
-        } elseif ($eid === 0x1549A966 && $end <= $hlen) {
+        } elseif ($eid === 0x1549A966 && ($vpos + $esz) <= (float)$hlen) {
+            $sawInfo = true;
             $ip = $vpos;
             while ($ip < $end) {
                 list($ie, $il) = fmp4EbmlReadId($hdr, $ip, $end);
@@ -173,10 +198,39 @@ function fmp4GetIndex($fullVideoPath) {
                 } elseif ($ie === 0x4489) {
                     $durRaw = fmp4EbmlReadFloat($hdr, $iv, (int)$is);
                 }
-                $ip = $iv + (int)$is;
+                $ip = fmp4ClampEnd($iv, $is, $end);
             }
         }
+        if ($end <= $p) break;
         $p = $end;
+    }
+
+    // If SegmentInfo was beyond the first 64KB (e.g. large font attachments), seek via SeekHead
+    if (!$sawInfo && $infoOff !== null) {
+        fseek($fp, (int)($segDataStart + $infoOff));
+        $ib = fread($fp, 12);
+        list($iid, $il) = fmp4EbmlReadId($ib, 0, strlen($ib));
+        list($isz, $isl) = fmp4EbmlReadVint($ib, $il, strlen($ib));
+        if ($iid === 0x1549A966 && $isz !== null && $isz > 0) {
+            fseek($fp, (int)($segDataStart + $infoOff + $il + $isl));
+            $idata = fmp4ReadExact($fp, min((int)$isz, 16384));
+            $ilen = strlen($idata);
+            $ip = 0;
+            while ($ip < $ilen) {
+                list($ie, $iel) = fmp4EbmlReadId($idata, $ip, $ilen);
+                if ($ie === null) break;
+                list($is, $iesl) = fmp4EbmlReadVint($idata, $ip + $iel, $ilen);
+                if ($is === null) break;
+                $iv = $ip + $iel + $iesl;
+                if ($ie === 0x2AD7B1 && (int)$is <= 8) {
+                    $v = fmp4EbmlReadUint($idata, $iv, (int)$is);
+                    if ($v > 0.0) $tcScale = $v;
+                } elseif ($ie === 0x4489) {
+                    $durRaw = fmp4EbmlReadFloat($idata, $iv, (int)$is);
+                }
+                $ip = fmp4ClampEnd($iv, $is, $ilen);
+            }
+        }
     }
 
     if ($tracksOff === null || $cuesOff === null) {
@@ -196,7 +250,7 @@ function fmp4GetIndex($fullVideoPath) {
         return false;
     }
     fseek($fp, (int)($segDataStart + $tracksOff + $tl + $tsl));
-    $tdata = fread($fp, min((int)$tsz, 262144));
+    $tdata = fmp4ReadExact($fp, min((int)$tsz, 262144));
     $tlen = strlen($tdata);
 
     $vTrack = null;
@@ -314,7 +368,7 @@ function fmp4GetIndex($fullVideoPath) {
     // Validate eligibility: H.264 (V_MPEG4/ISO/AVC with avcC) + AAC (A_AAC with AudioSpecificConfig) or video-only
     $vOk = ($vTrack !== null && !$vTrack['bad_enc'] && stripos($vTrack['codec'], 'AVC') !== false && strlen($vTrack['priv']) >= 7 && $vTrack['w'] > 0 && $vTrack['h'] > 0);
     $hasAudio = ($aTrack !== null);
-    $aOk = (!$hasAudio || (!$aTrack['bad_enc'] && stripos($aTrack['codec'], 'AAC') !== false && strlen($aTrack['priv']) >= 2));
+    $aOk = (!$hasAudio || (!$aTrack['bad_enc'] && stripos($aTrack['codec'], 'AAC') !== false && strlen($aTrack['priv']) >= 2 && strlen($aTrack['priv']) <= 64));
     if (!$vOk || !$aOk) {
         fclose($fp);
         @file_put_contents($cacheFile, json_encode(array('ok' => false)));
@@ -333,7 +387,7 @@ function fmp4GetIndex($fullVideoPath) {
         return false;
     }
     fseek($fp, (int)($cuesFilePos + $cl + $csl));
-    $cdata = fread($fp, min((int)$csz, 2097152));
+    $cdata = fmp4ReadExact($fp, min((int)$csz, 2097152));
     fclose($fp);
 
     $clen = strlen($cdata);
@@ -706,7 +760,7 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
         exit;
     }
     fseek($fp, intval($seg['pos']));
-    $raw = fread($fp, $span);
+    $raw = fmp4ReadExact($fp, $span);
     fclose($fp);
     $rlen = strlen($raw);
 
@@ -722,7 +776,7 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
         list($esz, $esl) = fmp4EbmlReadVint($raw, $p + $el, $rlen);
         if ($esz === null) break;
         $vpos = $p + $el + $esl;
-        $cend = min($rlen, $vpos + (int)$esz);
+        $cend = fmp4ClampEnd($vpos, $esz, $rlen);
         if ($eid === 0x1F43B675) { // Cluster
             $cp = $vpos;
             $clTc = 0.0;
@@ -732,7 +786,7 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
                 list($cs, $csl) = fmp4EbmlReadVint($raw, $cp + $cel, $cend);
                 if ($cs === null) break;
                 $cv = $cp + $cel + $csl;
-                $bend = min($cend, $cv + (int)$cs);
+                $bend = fmp4ClampEnd($cv, $cs, $cend);
                 if ($ce === 0xE7) {
                     $clTc = fmp4EbmlReadUint($raw, $cv, (int)$cs);
                 } elseif ($ce === 0xA3) { // SimpleBlock
@@ -770,9 +824,10 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
                         list($gs, $gsl) = fmp4EbmlReadVint($raw, $gp + $gel, $bend);
                         if ($gs === null) break;
                         $gv = $gp + $gel + $gsl;
-                        $gend = min($bend, $gv + (int)$gs);
+                        $gend = fmp4ClampEnd($gv, $gs, $bend);
                         if ($ge === 0xA1) { $blkPos = $gv; $blkEnd = $gend; }
                         elseif ($ge === 0xFB) { $hasRef = true; }
+                        if ($gend <= $gp) break;
                         $gp = $gend;
                     }
                     if ($blkPos !== -1) {
@@ -801,9 +856,11 @@ function fmp4ServeSegment($fullVideoPath, $idx, $segIdx) {
                         }
                     }
                 }
+                if ($bend <= $cp) break;
                 $cp = $bend;
             }
         }
+        if ($cend <= $p) break;
         $p = $cend;
     }
 

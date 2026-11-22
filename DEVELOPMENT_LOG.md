@@ -5,7 +5,7 @@
 - **웹 서버 배포 경로**: `/shares/webplayer/`
 - **미디어 루트 경로**: `/shares/Public/`
 - **로컬 작업 경로**: `C:\Users\nzlhu\Desktop\AI 작업\3. 경량 서버용 미디어 플레이어\`
-- **최신 안정 배포 버전**: `v20261104_v4`
+- **최신 안정 배포 버전**: `v20261123_1`
 
 ---
 
@@ -351,3 +351,25 @@
    - 실기 로그 분석 결과 창모드에서 `hlsTracks[i].mode = 'disabled'`를 호출하면 `AVPlayer`가 `hls_sub_m3u8` 수신 자체를 취소하고 전체화면 진입 후 `webkitbeginfullscreen` 내 JS 재활성화를 무시하는 iOS WebKit 특성을 확인.
    - iOS Safari에서는 재생 시작 시점부터 네이티브 HLS 자막 트랙을 `showing`으로 유지(`useIOSNativeCaptions()`)하고 커스텀 DOM 오버레이를 숨겨 이중 자막 없이 전체화면 진입 즉시 자막이 유지되도록 수정.
    - HLS WebVTT 헤더에 RFC 8216 §3.5 필수 `X-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000`(fMP4) / `MPEGTS:126000`(MPEG-TS) 및 `hls_sub_m3u8` `#EXT-X-VERSION:7` + `#EXT-X-INDEPENDENT-SEGMENTS`, 동일 시점 중복 ASS 큐 제거 추가.
+
+### Phase 26: 전수 버그 감사, PHP 5.6 불안정 정렬/다중 자막 타임아웃/32비트 오버플로 수정 및 통합 검증 (2026-11-23)
+1. **PHP 5.6 불안정 `usort()`로 인한 한국어 강제 자막(`Forced`) 우선 노출 버그 수정 (`api.php`)**:
+   - 실서버 검증 중 60개 내장 자막을 포함한 다국어 MKV(`Sparks.of.Tomorrow.S01E01`)에서 `collectHlsSubtitleTracks()`가 일반 한국어 자막(367큐) 대신 한국어 강제 자막(15큐)을 `DEFAULT=YES`로 배치하는 현상 발견.
+   - PHP 5.6의 `usort()`가 비안정 퀵정렬(unstable quicksort)을 사용하여 동점 항목의 순서가 뒤섞이는 원인을 규명하고, `is_forced` 우선순위 및 원본 인덱스(`orig_idx` / `_idx`) 타이브레이커를 `collectHlsSubtitleTracks()`와 `probe_subs` 폴백 정렬 모두에 적용하여 일반 한국어 자막이 100% 결정론적으로 최우선 선택되도록 수정.
+2. **다중 자막 MKV의 MPEG-TS 폴백(`hls_seg`) 5초 타임아웃(HTTP 404) 버그 해결 (`stream_sub.py`)**:
+   - 2GB 초과 파일 등에서 사용되는 `avconv` MPEG-TS 폴백 경로(`probe_hls_info()`)가 60개 자막 트랙이 혼재된 MKV의 수만 개 `CuePoint`를 순수 Python 루프로 전수 파싱하다 `timeout 5`에 의해 강제 종료되며 HTTP 404를 반환하던 결함 발견.
+   - `probe_hls_info()`에 인라인 `CuePoint` 파싱과 C-속도 `cues_data.find(v_track_sig, cbody, cend)` 사전 필터를 적용하여 `Sparks.of.Tomorrow` `hls_seg[0]` 응답을 `5121ms(404)` -> `2124ms(200 OK)`로 복구.
+3. **외부 자막 WebVTT RAM 캐시(`vtt2_ext_*.vtt`) 무제한 누적 누수 차단 (`api.php`)**:
+   - `action=hls_sub_vtt`의 캐시 정리 로직(최대 20개 초과 시 15개로 정리)이 내장 자막(`emb`) 분기에만 배치되어 외부 자막(`ext`) 변환 시 `/tmp/webplayer_sub_ram/`에 무한 누적되던 누수를 발견하여 공용 `pruneVttRamCache()`로 추출 후 양쪽 분기 모두에 적용.
+4. **서버측 WebVTT 변환기 동시 대사 SMI 및 공백 줄 SRT/VTT 호환성 보강 (`api.php`)**:
+   - `convertSubContentToVtt()`의 SMI 변환에서 동일 `Start` 타임스탬프를 가진 한영/화자 동시 대사가 3초 고정값으로 잘리지 않고 다음 고유 `Start` 시각까지 유지되도록 전방 탐색 추가.
+   - SRT/VTT 변환에서 공백 문자가 포함된 빈 줄(`\r?\n[ \t]*\r?\n`) 분할 및 WebVTT `NOTE`/`STYLE` 메타 블록 스킵을 추가하여 PHP CLI 단위 테스트 100% 통과 검증.
+5. **순수 PHP fMP4 파서의 32비트 미지정 크기(`0x01FFFFFFFFFFFFFF`) 오버플로 및 부분 `fread` 방어 (`fmp4_muxer.php`)**:
+   - 32비트 ARM PHP(`PHP_INT_MAX = 2,147,483,647`)에서 크기가 미지정(`unknown size`)인 MKV 클러스터를 `(int)$esz`로 캐스팅할 때 음수 오버플로로 클러스터가 통째로 스킵될 수 있는 위험을 차단하기 위해 부동소수점 안전 클램프 `fmp4ClampEnd()` 도입.
+   - 대용량 블록 읽기용 `fmp4ReadExact()` 루프, 64KB 이후 위치한 `SegmentInfo`용 `SeekHead` 탐색, `esds` 7비트 길이 오버플로 방어(`strlen(asc) <= 64`) 및 비정상 EBML 무한루프 가드 추가.
+6. **iOS HLS 자막 즉시 전환·로컬 자막 충돌 방지 및 `attachVideoSource` 리스너 누수 정리 (`app.js`, `style.css`)**:
+   - `loadSelectedTrack()`에서 iOS 네이티브 HLS 모드일 때 JS `fetch` 완료를 기다리지 않고 즉시 `handleFullscreenSubtitleSync()`를 호출해 자막 트랙 전환 지연을 제거.
+   - 로컬 외부 자막(`!subRel`) 로드 시 전체화면에서 서버 HLS 트랙이 덮어쓰지 않도록 분리하고, 다중 외부 자막의 `extRank` 매칭 및 언어 감지를 `api.php`와 1:1 정렬.
+   - `attachVideoSource()` 비-HLS 경로의 `loadedmetadata` 리스너를 `activeNativeMetaHandler`로 통합 관리하고, `app.js`/`style.css`의 중복 코드 제거.
+7. **전 구간 통합 검증 완료**:
+   - `php -l`, `node --check`, `py_compile`, 경로 탐색/심볼릭 링크 보안 테스트, ETag 304, FFmpeg 9.0 라이브 HLS 디코드(IP-only AAC 및 B-frame HE-AAC 0경고/0오류), 헤드리스 Chrome 네이티브 HLS 및 `hls.light.min.js` MSE 재생/탐색, NAS 잔여 RAM(`93MB`) 및 좀비 프로세스 `0개` 검증 완료.
