@@ -720,14 +720,213 @@ def fallback_avconv_stream(video_path, stream_id):
     except Exception:
         pass
 
+def probe_hls_info(video_path):
+    try:
+        f = open(video_path, 'rb')
+    except Exception as e:
+        print(json.dumps({"success": False, "error": str(e)}))
+        return
+
+    try:
+        seg_data_start, tracks_offset, cues_offset = parse_mkv_seekhead(f)
+        if seg_data_start is None or tracks_offset is None:
+            f.close()
+            print(json.dumps({"success": False, "error": "Not a standard MKV file"}))
+            return
+
+        # 1. Read SegmentInfo (0x1549A966) from first 64KB to get TimecodeScale & Duration
+        f.seek(0)
+        hdr = f.read(65536)
+        timecode_scale = 1000000.0
+        duration_raw = 0.0
+        info_idx = hdr.find(b'\x15\x49\xa9\x66', seg_data_start)
+        if info_idx != -1:
+            isz, isl = read_vint(hdr, info_idx + 4)
+            if isz is not None:
+                info_data = hdr[info_idx + 4 + isl : info_idx + 4 + isl + min(isz, 8192)]
+                ip = 0
+                while ip < len(info_data):
+                    eid, el = read_id(info_data, ip)
+                    if eid is None: break
+                    esz, esl = read_vint(info_data, ip + el)
+                    if esz is None: break
+                    vpos = ip + el + esl
+                    if eid == 0x2AD7B1 and esz <= 8:
+                        v = 0
+                        for i in range(esz): v = (v << 8) | ord(info_data[vpos + i])
+                        if v > 0: timecode_scale = float(v)
+                    elif eid == 0x4489:
+                        raw_f = info_data[vpos : vpos + esz]
+                        if esz == 4:
+                            duration_raw = struct.unpack('>f', raw_f)[0]
+                        elif esz == 8:
+                            duration_raw = struct.unpack('>d', raw_f)[0]
+                    ip = vpos + esz
+
+        duration_sec = (duration_raw * timecode_scale) / 1000000000.0
+
+        # 2. Read Tracks (0x1654AE6B) to find video & audio stream indices and codecs
+        f.seek(seg_data_start + tracks_offset)
+        tid_b = f.read(12)
+        tid, tl = read_id(tid_b, 0)
+        tsz, tsl = read_vint(tid_b, tl)
+        if tsz is None:
+            f.close()
+            print(json.dumps({"success": False, "error": "Invalid Tracks"}))
+            return
+        f.seek(seg_data_start + tracks_offset + tl + tsl)
+        tracks_data = f.read(min(tsz, 262144))
+
+        video_stream = None
+        video_codec = ''
+        audio_stream = None
+        audio_codec = ''
+        cur_stream = 0
+        p = 0
+        while p < len(tracks_data):
+            eid, el = read_id(tracks_data, p)
+            if eid is None: break
+            esz, esl = read_vint(tracks_data, p + el)
+            if esz is None: break
+            entry_end = p + el + esl + esz
+            if eid == 0xAE:
+                ep = p + el + esl
+                ttype = None
+                tcodec = ''
+                while ep < entry_end:
+                    ieid, iel = read_id(tracks_data, ep)
+                    if ieid is None: break
+                    isz, isl = read_vint(tracks_data, ep + iel)
+                    if isz is None: break
+                    vpos = ep + iel + isl
+                    if ieid == 0x83 and isz >= 1:
+                        ttype = ord(tracks_data[vpos])
+                    elif ieid == 0x86:
+                        raw_c = tracks_data[vpos : vpos + isz]
+                        try:
+                            tcodec = raw_c.decode('utf-8', 'ignore')
+                        except Exception:
+                            tcodec = str(raw_c)
+                    ep = vpos + isz
+                if ttype == 1 and video_stream is None:
+                    video_stream = cur_stream
+                    cu = tcodec.upper()
+                    if 'AVC' in cu or 'H264' in cu: video_codec = 'h264'
+                    elif 'HEVC' in cu or 'H265' in cu: video_codec = 'hevc'
+                    elif 'VP9' in cu: video_codec = 'vp9'
+                    elif 'VP8' in cu: video_codec = 'vp8'
+                    else: video_codec = cu
+                elif ttype == 2 and audio_stream is None:
+                    audio_stream = cur_stream
+                    cu = tcodec.upper()
+                    if 'AAC' in cu: audio_codec = 'aac'
+                    elif 'MPEG/L3' in cu or 'MP3' in cu: audio_codec = 'mp3'
+                    elif 'AC3' in cu or 'EAC3' in cu: audio_codec = 'ac3'
+                    elif 'DTS' in cu: audio_codec = 'dts'
+                    elif 'FLAC' in cu: audio_codec = 'flac'
+                    elif 'OPUS' in cu: audio_codec = 'opus'
+                    else: audio_codec = cu
+                cur_stream += 1
+            p = entry_end
+
+        if video_stream is None:
+            f.close()
+            print(json.dumps({"success": False, "error": "No video stream found"}))
+            return
+
+        # 3. Read Cues (0x1C53BB6B) to collect exact keyframe timestamps
+        kf_times = []
+        if cues_offset is not None:
+            f.seek(seg_data_start + cues_offset)
+            cid_b = f.read(12)
+            cid, cl = read_id(cid_b, 0)
+            csz, csl = read_vint(cid_b, cl)
+            if cid == 0x1C53BB6B and csz is not None and csz > 0:
+                f.seek(seg_data_start + cues_offset + cl + csl)
+                cues_data = f.read(min(csz, 2097152))
+                cp = 0
+                clen = len(cues_data)
+                scale_sec = timecode_scale / 1000000000.0
+                last_t = -1.0
+                while cp < clen:
+                    ceid, cel = read_id(cues_data, cp)
+                    if ceid is None: break
+                    cesz, cesl = read_vint(cues_data, cp + cel)
+                    if cesz is None: break
+                    cend = cp + cel + cesl + cesz
+                    if ceid == 0xBB:
+                        ip = cp + cel + cesl
+                        while ip < cend:
+                            ieid, iel = read_id(cues_data, ip)
+                            if ieid is None: break
+                            iesz, iesl = read_vint(cues_data, ip + iel)
+                            if iesz is None: break
+                            ivpos = ip + iel + iesl
+                            if ieid == 0xB3 and iesz <= 8:
+                                v = 0
+                                for i in range(iesz): v = (v << 8) | ord(cues_data[ivpos + i])
+                                t_sec = v * scale_sec
+                                if t_sec > last_t + 0.001:
+                                    kf_times.append(t_sec)
+                                    last_t = t_sec
+                                break
+                            ip = ivpos + iesz
+                    cp = cend
+        f.close()
+
+        if duration_sec <= 0 and kf_times:
+            duration_sec = kf_times[-1] + 5.0
+
+        # 4. Group keyframes into ~10s HLS segments
+        segments = []
+        target_dur = 10.0
+        if len(kf_times) >= 2:
+            seg_start = 0.0
+            for t in kf_times:
+                if t - seg_start >= 9.0:
+                    dur = round(t - seg_start, 3)
+                    if dur > 0.1:
+                        segments.append({"start": round(seg_start, 3), "dur": dur})
+                    seg_start = t
+            rem = round(duration_sec - seg_start, 3)
+            if rem > 0.2:
+                segments.append({"start": round(seg_start, 3), "dur": rem})
+        elif duration_sec > 0:
+            cur = 0.0
+            while cur < duration_sec:
+                dur = round(min(target_dur, duration_sec - cur), 3)
+                if dur > 0.2:
+                    segments.append({"start": round(cur, 3), "dur": dur})
+                cur += target_dur
+
+        remuxable = (video_codec == 'h264')
+        print(json.dumps({
+            "success": True,
+            "duration": round(duration_sec, 3),
+            "video_stream": video_stream,
+            "video_codec": video_codec,
+            "audio_stream": audio_stream,
+            "audio_codec": audio_codec,
+            "remuxable": remuxable,
+            "segments": segments
+        }))
+    except Exception as e:
+        try: f.close()
+        except Exception: pass
+        print(json.dumps({"success": False, "error": str(e)}))
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        sys.stderr.write("Usage: stream_sub.py probe <video_path> OR stream_sub.py <video_path> <stream_id>\n")
+        sys.stderr.write("Usage: stream_sub.py probe|hls_info <video_path> OR stream_sub.py <video_path> <stream_id>\n")
         sys.exit(1)
     if sys.argv[1] == 'probe':
         if len(sys.argv) < 3:
             sys.exit(1)
         probe_subtitles(sys.argv[2])
+    elif sys.argv[1] == 'hls_info':
+        if len(sys.argv) < 3:
+            sys.exit(1)
+        probe_hls_info(sys.argv[2])
     else:
         if len(sys.argv) < 3:
             sys.exit(1)

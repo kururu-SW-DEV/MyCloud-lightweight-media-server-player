@@ -364,6 +364,203 @@ if (isset($_GET['action']) && $_GET['action'] === 'stream_sub') {
     exit;
 }
 
+// -------------------------------------------------------------
+// Helper: Load or generate keyframe-aligned HLS segment metadata (RAM cached)
+// -------------------------------------------------------------
+function getHlsInfo($fullVideoPath) {
+    $tmpDir = '/tmp/webplayer_sub_ram';
+    if (is_link($tmpDir)) @unlink($tmpDir);
+    if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
+    $cacheFile = $tmpDir . '/hls_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath)) . '.json';
+    if (file_exists($cacheFile) && filesize($cacheFile) > 0) {
+        $cached = @json_decode(@file_get_contents($cacheFile), true);
+        if (is_array($cached) && !empty($cached['success'])) {
+            return $cached;
+        }
+    }
+    $cmd = 'timeout 5 python /shares/webplayer/stream_sub.py hls_info ' . safeShellArg($fullVideoPath) . ' 2>/dev/null';
+    $out = @shell_exec($cmd);
+    if (!empty($out)) {
+        $parsed = @json_decode($out, true);
+        if (is_array($parsed) && !empty($parsed['success']) && !empty($parsed['segments'])) {
+            @file_put_contents($cacheFile, $out);
+            $hlsFiles = @glob($tmpDir . '/hls_*.json');
+            if ($hlsFiles && count($hlsFiles) > 40) {
+                usort($hlsFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
+                while (count($hlsFiles) > 30) {
+                    @unlink(array_shift($hlsFiles));
+                }
+            }
+            return $parsed;
+        }
+    }
+    return array('success' => false, 'error' => 'HLS keyframe index unavailable');
+}
+
+// -------------------------------------------------------------
+// Action 3: On-demand Virtual HLS Manifest (.m3u8) for MKV Remuxing
+// -------------------------------------------------------------
+if (isset($_GET['action']) && $_GET['action'] === 'hls_manifest') {
+    $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
+    if (empty($videoRel) || !validateRelativePath($videoRel)) {
+        header('HTTP/1.1 400 Bad Request');
+        echo "Invalid video path";
+        exit;
+    }
+    $rawPath = $baseDir . '/' . $videoRel;
+    if (is_link($rawPath)) {
+        header('HTTP/1.1 403 Forbidden');
+        echo "Forbidden";
+        exit;
+    }
+    $fullVideoPath = realpath($rawPath);
+    if ($fullVideoPath === false || !isWithinBaseDir($fullVideoPath, $baseDir) || !is_file($fullVideoPath)) {
+        header('HTTP/1.1 404 Not Found');
+        echo "File not found";
+        exit;
+    }
+
+    $info = getHlsInfo($fullVideoPath);
+    if (empty($info['success']) || empty($info['segments'])) {
+        header('HTTP/1.1 422 Unprocessable Entity');
+        echo "HLS remuxing not supported for this file";
+        exit;
+    }
+
+    $maxDur = 10;
+    foreach ($info['segments'] as $seg) {
+        if ($seg['dur'] > $maxDur) {
+            $maxDur = (int)ceil($seg['dur']);
+        }
+    }
+
+    header('Content-Type: application/vnd.apple.mpegurl; charset=utf-8');
+    header('Cache-Control: private, max-age=300');
+
+    $encodedVideo = rawurlencode($videoRel);
+    echo "#EXTM3U\n";
+    echo "#EXT-X-VERSION:3\n";
+    echo "#EXT-X-TARGETDURATION:" . $maxDur . "\n";
+    echo "#EXT-X-MEDIA-SEQUENCE:0\n";
+    echo "#EXT-X-PLAYLIST-TYPE:VOD\n";
+
+    foreach ($info['segments'] as $idx => $seg) {
+        if ($idx > 0) {
+            echo "#EXT-X-DISCONTINUITY\n";
+        }
+        echo sprintf("#EXTINF:%.3f,\n", (float)$seg['dur']);
+        echo "api.php?action=hls_seg&video=" . $encodedVideo . "&i=" . $idx . "\n";
+    }
+    echo "#EXT-X-ENDLIST\n";
+    exit;
+}
+
+// -------------------------------------------------------------
+// Action 4: Zero-Disk On-Demand MPEG-TS Segment Remuxer (avconv -c copy)
+// -------------------------------------------------------------
+if (isset($_GET['action']) && $_GET['action'] === 'hls_seg') {
+    $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
+    $segIdx = isset($_GET['i']) ? intval($_GET['i']) : -1;
+    if (empty($videoRel) || !validateRelativePath($videoRel) || $segIdx < 0) {
+        header('HTTP/1.1 400 Bad Request');
+        echo "Invalid parameters";
+        exit;
+    }
+    $rawPath = $baseDir . '/' . $videoRel;
+    if (is_link($rawPath)) {
+        header('HTTP/1.1 403 Forbidden');
+        echo "Forbidden";
+        exit;
+    }
+    $fullVideoPath = realpath($rawPath);
+    if ($fullVideoPath === false || !isWithinBaseDir($fullVideoPath, $baseDir) || !is_file($fullVideoPath)) {
+        header('HTTP/1.1 404 Not Found');
+        echo "File not found";
+        exit;
+    }
+
+    $info = getHlsInfo($fullVideoPath);
+    if (empty($info['success']) || !isset($info['segments'][$segIdx])) {
+        header('HTTP/1.1 404 Not Found');
+        echo "Segment not found";
+        exit;
+    }
+
+    $seg = $info['segments'][$segIdx];
+    $startSec = sprintf('%.3f', max(0.0, (float)$seg['start']));
+    $durSec = sprintf('%.3f', max(0.2, (float)$seg['dur']));
+    $vStream = isset($info['video_stream']) ? intval($info['video_stream']) : 0;
+    $aStream = (isset($info['audio_stream']) && $info['audio_stream'] !== null) ? intval($info['audio_stream']) : -1;
+    $vCodec = isset($info['video_codec']) ? strtolower($info['video_codec']) : '';
+
+    if (function_exists('apache_setenv')) {
+        @apache_setenv('no-gzip', '1');
+    }
+    @ini_set('zlib.output_compression', '0');
+    while (ob_get_level()) {
+        @ob_end_clean();
+    }
+
+    header('Content-Type: video/mp2t');
+    header('Cache-Control: private, max-age=300');
+    header('X-Accel-Buffering: no');
+
+    $mapArgs = '-map 0:' . $vStream;
+    if ($aStream >= 0) {
+        $mapArgs .= ' -map 0:' . $aStream;
+    }
+    $bsfArg = ($vCodec === 'h264') ? ' -bsf:v h264_mp4toannexb' : '';
+
+    $cmd = 'exec /usr/local/wdmcserver/bin/avconv -ss ' . $startSec
+        . ' -i ' . safeShellArg($fullVideoPath)
+        . ' -t ' . $durSec
+        . ' ' . $mapArgs
+        . ' -c:v copy -c:a copy' . $bsfArg
+        . ' -f mpegts pipe:1';
+
+    $descriptors = array(
+        0 => array('pipe', 'r'),
+        1 => array('pipe', 'w'),
+        2 => array('file', '/dev/null', 'w')
+    );
+    $sysPath = getenv('PATH') ?: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+    $procEnv = array(
+        'LANG' => 'C.UTF-8',
+        'LC_ALL' => 'C.UTF-8',
+        'PATH' => $sysPath,
+        'LD_LIBRARY_PATH' => '/usr/local/wdmcserver/lib'
+    );
+
+    $proc = @proc_open($cmd, $descriptors, $pipes, null, $procEnv);
+    if (is_resource($proc)) {
+        fclose($pipes[0]);
+        stream_set_blocking($pipes[1], 1);
+        stream_set_timeout($pipes[1], 20);
+        while (!feof($pipes[1])) {
+            if (connection_aborted()) {
+                @proc_terminate($proc, 9);
+                break;
+            }
+            $buf = fread($pipes[1], 32768);
+            $meta = stream_get_meta_data($pipes[1]);
+            if ($meta['timed_out']) {
+                @proc_terminate($proc, 9);
+                break;
+            }
+            if ($buf !== false && strlen($buf) > 0) {
+                echo $buf;
+                flush();
+            }
+        }
+        fclose($pipes[1]);
+        if (connection_aborted()) {
+            @proc_terminate($proc, 9);
+        }
+        @proc_close($proc);
+    }
+    exit;
+}
+
 header('Content-Type: application/json; charset=utf-8');
 $mode = isset($_GET['all']) && $_GET['all'] == '1' ? 'all' : 'folder';
 

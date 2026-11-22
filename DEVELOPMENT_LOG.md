@@ -288,3 +288,15 @@
 4. **자막 파일명 매칭 인라인 문자 비교 및 비디오 베이스네임 길이 캐싱 (`api.php`)**:
    - `isMatchingSubtitleBase` 함수에서 다음 구분자 문자 검사 시 `in_array($c, array('.', '_', ...))` 배열을 매번 동적 생성하던 PHP 내부 해시테이블 할당을 인라인 동등 비교(`$nextChar === '.' || ...`)로 변경하여 메모리 할당 0화.
    - 비디오 베이스네임의 길이(`$vLen`)를 루프 진입 전 1회만 계산하여 자막 비교 루프에 전달함으로써 불필요한 `strlen()` 재계산 오버헤드 제거.
+
+### Phase 21: 제로 디스크 온디맨드 실시간 MKV -> HLS(MPEG-TS) 리먹싱 엔진 구축 (2026-11-22)
+1. **MKV 키프레임(Cues) 정렬 가상 HLS 인덱서 구현 (`stream_sub.py`)**:
+   - `hls_info` 서브커맨드를 추가하여 MKV의 `SegmentInfo`(`TimecodeScale`, `Duration`), `Tracks`(비디오/오디오 스트림 및 코덱), `Cues`(전체 IDR 키프레임 타임스탬프)를 디스크 쓰기 없이 수십 ms 내에 고속 파싱.
+   - 키프레임 경계에 정확히 맞춘 약 10초 단위 세그먼트 목록을 생성하여, 구버전 `avconv 0.8.13`에서 비-키프레임 탐색 시 발생하던 33-bit PTS 음수 래핑(`95443s`) 현상을 원천 차단.
+2. **가상 HLS 매니페스트 및 온디맨드 세그먼트 리먹싱 API (`api.php`)**:
+   - `action=hls_manifest`: RAM 캐시(`/tmp/webplayer_sub_ram/hls_*.json`, 최대 40개 자동 정리) 기반으로 `#EXT-X-DISCONTINUITY`가 포함된 표준 RFC 8216 VOD `.m3u8` 매니페스트를 즉석 생성.
+   - `action=hls_seg`: 요청된 세그먼트 인덱스(`i`)만 `/usr/local/wdmcserver/bin/avconv -ss <start> -i <mkv> -t <dur> -c:v copy -c:a copy -bsf:v h264_mp4toannexb -f mpegts pipe:1`로 HDD 쓰기 없이 실시간 리먹싱 스트리밍. `connection_aborted()` 및 20초 타임아웃 시 `proc_terminate(9)`로 좀비 프로세스 완전 차단.
+3. **자동 감지·폴백·수동 전환 UI 및 오프라인 `hls.js` 지원 (`index.html`, `app.js`, `deploy_webplayer.py`)**:
+   - iOS Safari / macOS Safari / Firefox 등 MKV 미지원 브라우저에서는 자동으로 실시간 HLS 리먹싱 모드로 재생(Safari는 네이티브 HLS, 비-Safari는 로컬 `hls.light.min.js` 지연 로드로 LAN 오프라인 완전 지원).
+   - Chrome/Edge에서는 0-CPU 원본 직접 재생을 우선 시도하되, 재생 오류(`error`) 발생 시 실시간 HLS 리먹싱으로 자동 폴백.
+   - 플레이어 상단에 MKV 전용 **HLS** 수동 전환 버튼(`#btn-hls-remux`)을 추가하여 재생 위치(`currentTime`)를 유지한 채 원본/HLS 모드 간 즉시 전환 가능.

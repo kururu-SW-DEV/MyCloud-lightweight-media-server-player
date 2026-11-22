@@ -1135,14 +1135,149 @@ if (modeAllBtn) {
 }
 
 // -------------------------------------------------------------
-// 3. Open Video Player & Subtitle Management
+// 3. Open Video Player, On-Demand HLS Remuxing & Subtitle Management
 // -------------------------------------------------------------
+const btnHlsRemux = document.getElementById('btn-hls-remux');
+const hlsRemuxText = document.getElementById('hls-remux-text');
+let activeHlsInstance = null;
+let isHlsRemuxActive = false;
+let hlsAutoFallbackAttempted = false;
+let _hlsScriptPromise = null;
+
+function browserNeedsMkvRemux() {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isSafari = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(ua);
+    const isFirefox = /firefox|fxios/i.test(ua);
+    return isIOS || isSafari || isFirefox;
+}
+
+function destroyHlsInstance() {
+    if (activeHlsInstance) {
+        try { activeHlsInstance.destroy(); } catch (e) {}
+        activeHlsInstance = null;
+    }
+}
+
+function loadHlsLibrary() {
+    if (window.Hls) return Promise.resolve(window.Hls);
+    if (_hlsScriptPromise) return _hlsScriptPromise;
+    _hlsScriptPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'hls.light.min.js?v=20261122_1';
+        s.onload = () => resolve(window.Hls);
+        s.onerror = () => {
+            _hlsScriptPromise = null;
+            reject(new Error('HLS 라이브러리를 불러올 수 없습니다.'));
+        };
+        document.head.appendChild(s);
+    });
+    return _hlsScriptPromise;
+}
+
+function updateHlsButtonUI(video) {
+    if (!btnHlsRemux) return;
+    const isMkv = video && (video.ext || '').toLowerCase() === 'mkv';
+    btnHlsRemux.style.display = isMkv ? 'inline-flex' : 'none';
+    if (isHlsRemuxActive) {
+        btnHlsRemux.style.borderColor = 'var(--accent)';
+        btnHlsRemux.style.color = 'var(--accent)';
+        if (hlsRemuxText) hlsRemuxText.textContent = 'HLS ON';
+    } else {
+        btnHlsRemux.style.borderColor = '';
+        btnHlsRemux.style.color = '';
+        if (hlsRemuxText) hlsRemuxText.textContent = 'HLS';
+    }
+}
+
+async function attachVideoSource(video, useHls, resumeTime = 0) {
+    if (!video || !videoPlayer) return;
+    destroyHlsInstance();
+    isHlsRemuxActive = Boolean(useHls);
+    updateHlsButtonUI(video);
+
+    if (!isHlsRemuxActive) {
+        videoPlayer.src = video.url;
+        if (resumeTime > 0) {
+            const onMeta = () => {
+                videoPlayer.removeEventListener('loadedmetadata', onMeta);
+                try { videoPlayer.currentTime = resumeTime; } catch (e) {}
+            };
+            videoPlayer.addEventListener('loadedmetadata', onMeta);
+        }
+        videoPlayer.play().catch(() => {});
+        return;
+    }
+
+    const hlsUrl = `api.php?action=hls_manifest&video=${encodeURIComponent(video.rel_path)}`;
+    const nativeHls = videoPlayer.canPlayType('application/vnd.apple.mpegurl');
+    if (nativeHls === 'probably' || nativeHls === 'maybe') {
+        videoPlayer.src = hlsUrl;
+        if (resumeTime > 0) {
+            const onMeta = () => {
+                videoPlayer.removeEventListener('loadedmetadata', onMeta);
+                try { videoPlayer.currentTime = resumeTime; } catch (e) {}
+            };
+            videoPlayer.addEventListener('loadedmetadata', onMeta);
+        }
+        videoPlayer.play().catch(() => {});
+        return;
+    }
+
+    try {
+        const HlsLib = await loadHlsLibrary();
+        if (activeVideo !== video) return;
+        if (HlsLib && HlsLib.isSupported()) {
+            const hls = new HlsLib({
+                maxBufferLength: 20,
+                maxMaxBufferLength: 30,
+                backBufferLength: 20,
+                startPosition: resumeTime > 0 ? resumeTime : -1
+            });
+            activeHlsInstance = hls;
+            hls.loadSource(hlsUrl);
+            hls.attachMedia(videoPlayer);
+            hls.on(HlsLib.Events.MANIFEST_PARSED, () => {
+                if (activeVideo !== video) return;
+                videoPlayer.play().catch(() => {});
+            });
+            hls.on(HlsLib.Events.ERROR, (evt, data) => {
+                if (!data || !data.fatal) return;
+                if (data.type === HlsLib.ErrorTypes.NETWORK_ERROR) {
+                    hls.startLoad();
+                } else if (data.type === HlsLib.ErrorTypes.MEDIA_ERROR) {
+                    hls.recoverMediaError();
+                } else {
+                    destroyHlsInstance();
+                    showToast('실시간 HLS 리먹싱 스트림 오류가 발생했습니다.', 4000);
+                }
+            });
+        } else {
+            showToast('이 브라우저는 HLS 스트리밍을 지원하지 않습니다.', 4000);
+        }
+    } catch (e) {
+        showToast(e.message || 'HLS 리먹싱 초기화 실패', 4000);
+    }
+}
+
+if (btnHlsRemux) {
+    btnHlsRemux.addEventListener('click', () => {
+        if (!activeVideo) return;
+        const pos = (videoPlayer && isFinite(videoPlayer.currentTime)) ? videoPlayer.currentTime : 0;
+        const nextMode = !isHlsRemuxActive;
+        hlsAutoFallbackAttempted = true;
+        showToast(nextMode ? '실시간 HLS 리먹싱 모드로 전환합니다...' : '원본 직접 재생 모드로 전환합니다...');
+        attachVideoSource(activeVideo, nextMode, pos);
+    });
+}
+
 window.openPlayer = async function(encodedRelPath) {
     const relPath = decodeURIComponent(encodedRelPath);
     const video = currentVideos.find(v => v.rel_path === relPath);
     if (!video) return;
     
     activeVideo = video;
+    hlsAutoFallbackAttempted = false;
     userManuallySelectedSubtitle = false;
     document.title = `${video.name} - MyCloud Media Player`;
     if (playerTitleText) {
@@ -1151,7 +1286,12 @@ window.openPlayer = async function(encodedRelPath) {
         playerTitle.textContent = video.name;
     }
     if (downloadLink) downloadLink.href = video.url;
-    videoPlayer.src = video.url;
+    const isMkv = (video.ext || '').toLowerCase() === 'mkv';
+    const startWithHls = isMkv && browserNeedsMkvRemux();
+    if (startWithHls) {
+        showToast('실시간 HLS 리먹싱 모드로 재생합니다.');
+    }
+    attachVideoSource(video, startWithHls, 0);
     
     clearSubtitles();
     
@@ -1184,7 +1324,6 @@ window.openPlayer = async function(encodedRelPath) {
     }
     
     setupMediaSession(video);
-    videoPlayer.play().catch(() => {});
     
     // 2. Probe embedded subtitle tracks with AbortController, client cache, and race condition guard
     if (currentProbeAbortController) {
@@ -1843,6 +1982,9 @@ function closePlayer() {
         exitFullscreenSafe();
     }
     if (isMinimized) restoreFromMinimize();
+    destroyHlsInstance();
+    isHlsRemuxActive = false;
+    hlsAutoFallbackAttempted = false;
     videoPlayer.pause();
     videoPlayer.removeAttribute('src');
     videoPlayer.load();
@@ -2196,8 +2338,15 @@ function setupMediaSession(video) {
 
 if (videoPlayer) {
     videoPlayer.addEventListener('error', () => {
-        if (!videoPlayer.src || videoPlayer.src === window.location.href) return;
+        if (!videoPlayer.getAttribute('src') || videoPlayer.src === window.location.href) return;
         const err = videoPlayer.error;
+        // Automatic fallback to On-Demand Real-Time HLS Remuxing when direct MKV playback fails
+        if (activeVideo && (activeVideo.ext || '').toLowerCase() === 'mkv' && !isHlsRemuxActive && !hlsAutoFallbackAttempted) {
+            hlsAutoFallbackAttempted = true;
+            showToast('MKV 직접 재생 미지원 — 실시간 HLS 리먹싱으로 자동 전환합니다...', 3500);
+            attachVideoSource(activeVideo, true, videoPlayer.currentTime || 0);
+            return;
+        }
         let msg = '동영상 재생 중 오류가 발생했습니다.';
         if (err) {
             if (err.code === 4) {

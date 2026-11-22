@@ -3941,6 +3941,11 @@ def main():
         print("[9] Writing app.js...")
         with sftp.open('/shares/webplayer/app.js', 'wb') as f:
             f.write(get_file_content('app.js', APP_JS))
+
+        hls_local = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'webplayer', 'hls.light.min.js')
+        if os.path.exists(hls_local):
+            print("[9b] Writing hls.light.min.js (Offline HLS remux player)...")
+            sftp.put(hls_local, '/shares/webplayer/hls.light.min.js')
             
         print("[10] Setting permissions for Windows Explorer editability...")
         nas_owner = os.environ.get('NAS_OWNER', 'root')
