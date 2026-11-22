@@ -316,3 +316,12 @@
    - `openPlayer()`에서 `playerModal.classList.add('active')`를 `attachVideoSource()`보다 먼저 실행하여 `<video>`가 렌더 트리에 표시된 상태에서 사용자 탭 제스처 내 `play()`가 호출되도록 수정.
    - 네이티브 Safari HLS 경로에서 불필요한 `videoPlayer.load()` 선행 호출 및 중복 `loadedmetadata` 리스너 누수를 제거하여 세그먼트 0 조기 중단/재요청 방지.
    - 터치 기기에서 네이티브 `<video controls>` 재생 탭과 충돌하던 `videoPlayer` `click` 토글 핸들러를 데스크톱 전용으로 분기하고 `webkit-playsinline` 속성 추가.
+
+### Phase 23: HLS 세그먼트 인프로세스 PHP 타임스탬프 시프트 및 1-세그먼트 선행 프리페치 가속 (2026-11-23)
+1. **인프로세스 PHP 33-bit PCR/PTS/DTS 시프트 전환 (`api.php`)**:
+   - 매 세그먼트마다 별도 Python 프로세스를 생성해 순수 루프로 TS 패킷을 순회하던 `stream_sub.py ts_shift`(`0.64s ~ 0.78s`)를 제거하고, 이미 상주 중인 PHP 내부에서 32-bit ARM 부동소수점 정밀도(53-bit mantissa)로 33-bit 타임스탬프를 직접 보정하는 `shiftTsFileInPlace()` 구현.
+   - 문자열 비트마스크 사전 필터로 페이로드 패킷의 99% 이상을 `ord()` 호출 없이 건너뛰어 보정 시간을 **`0.71s -> 0.14s`(5배 가속)**로 단축(기존 Python 출력과 MD5 100% 바이트 동일 검증).
+2. **비차단 1-세그먼트 선행 프리페치(Lookahead Prefetch) 구현 (`api.php`)**:
+   - `api.php` 내부 CLI 모드(`--prefetch`)와 `flock -n hseg_prefetch.lock` 비차단 락을 결합해, NAS 전체에서 동시에 최대 1개의 프리페치 작업만 실행되도록 보장(CPU/RAM 누적 방지).
+   - `hls_master` / `hls_manifest` 응답 시 `seg 0`을 백그라운드로 즉시 워밍업하고, `hls_seg`에서 `seg N`을 네트워크로 전송하는 동안 `seg N+1`을 병렬로 RAM 캐시(`hseg_v3_*`, 최대 5세그먼트 상한 및 60초 초과 `.tmp` 자동 정리)에 선행 생성.
+   - 실기 아이폰 WAN 재생 로그에서 프리페치 적중 시 `2.7~2.8MB` 세그먼트 전체 응답 시간이 기존 `~2.5s`에서 **`0.92s ~ 0.97s`**로 단축됨을 확인.

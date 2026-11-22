@@ -1,5 +1,7 @@
 <?php
-header('Access-Control-Allow-Origin: *');
+if (PHP_SAPI !== 'cli') {
+    header('Access-Control-Allow-Origin: *');
+}
 @setlocale(LC_ALL, 'C.UTF-8');
 
 function safeShellArg($arg) {
@@ -397,6 +399,218 @@ function getHlsInfo($fullVideoPath) {
     return array('success' => false, 'error' => 'HLS keyframe index unavailable');
 }
 
+// Fast in-process 33-bit MPEG-TS PCR/PTS/DTS shifter (5x faster than spawning Python,
+// 32-bit ARM PHP float-safe with 53-bit exact mantissa, byte-for-byte identical).
+function shiftTsPts33(&$buf, $pos, $off90k) {
+    $b0 = ord($buf[$pos]);
+    $b1 = ord($buf[$pos + 1]);
+    $b2 = ord($buf[$pos + 2]);
+    $b3 = ord($buf[$pos + 3]);
+    $b4 = ord($buf[$pos + 4]);
+    $val = ((($b0 >> 1) & 0x07) * 1073741824.0)
+         + ($b1 * 4194304.0)
+         + ((($b2 >> 1) & 0x7F) * 32768.0)
+         + ($b3 * 128.0)
+         + (($b4 >> 1) & 0x7F);
+    $val = fmod($val + $off90k, 8589934592.0);
+    if ($val < 0.0) $val += 8589934592.0;
+    $hi = (int)floor($val / 1073741824.0);
+    $rInt = (int)($val - ($hi * 1073741824.0));
+    $buf[$pos]     = chr(($b0 & 0xF1) | (($hi & 0x07) << 1));
+    $buf[$pos + 1] = chr(($rInt >> 22) & 0xFF);
+    $buf[$pos + 2] = chr(((($rInt >> 15) & 0x7F) << 1) | 0x01);
+    $buf[$pos + 3] = chr(($rInt >> 7) & 0xFF);
+    $buf[$pos + 4] = chr((($rInt & 0x7F) << 1) | 0x01);
+}
+
+function shiftTsPcr33(&$buf, $p, $off90k) {
+    $p0 = ord($buf[$p]);
+    $p1 = ord($buf[$p + 1]);
+    $p2 = ord($buf[$p + 2]);
+    $p3 = ord($buf[$p + 3]);
+    $p4 = ord($buf[$p + 4]);
+    $pcr = ($p0 * 33554432.0) + ($p1 * 131072.0) + ($p2 * 512.0) + ($p3 * 2.0) + ($p4 >> 7);
+    $pcr = fmod($pcr + $off90k, 8589934592.0);
+    if ($pcr < 0.0) $pcr += 8589934592.0;
+    $b0 = (int)floor($pcr / 33554432.0);
+    $rem = (int)($pcr - ($b0 * 33554432.0));
+    $buf[$p]     = chr($b0 & 0xFF);
+    $buf[$p + 1] = chr(($rem >> 17) & 0xFF);
+    $buf[$p + 2] = chr(($rem >> 9) & 0xFF);
+    $buf[$p + 3] = chr(($rem >> 1) & 0xFF);
+    $buf[$p + 4] = chr((($rem & 1) << 7) | ($p4 & 0x7F));
+}
+
+function shiftTsFileInPlace($tsPath, $offsetSec) {
+    $off90k = fmod(round($offsetSec * 90000.0), 8589934592.0);
+    if ($off90k == 0.0) return true;
+    $data = @file_get_contents($tsPath);
+    if ($data === false) return false;
+    $n = strlen($data);
+    if ($n < 188) return true;
+    $limit = $n - 187;
+    for ($off = 0; $off < $limit; $off += 188) {
+        if ($data[$off] !== "\x47") {
+            $nextSync = strpos($data, "\x47", $off + 1);
+            if ($nextSync === false) break;
+            $off = $nextSync - 188;
+            continue;
+        }
+        // Fast string bitmask check skips >99% of video payload packets with zero ord() calls
+        if (($data[$off + 1] & "\x40") === "\x00" && ($data[$off + 3] & "\x20") === "\x00") {
+            continue;
+        }
+        $b1 = ord($data[$off + 1]);
+        $b3 = ord($data[$off + 3]);
+        $idx = $off + 4;
+        if (($b3 & 0x20) !== 0) {
+            $afLen = ord($data[$idx]);
+            if ($afLen >= 7 && ($idx + 6 < $off + 188) && (ord($data[$idx + 1]) & 0x10) !== 0) {
+                shiftTsPcr33($data, $idx + 2, $off90k);
+            }
+            $idx += 1 + $afLen;
+        }
+        if (($b1 & 0x40) !== 0 && ($b3 & 0x10) !== 0 && $idx + 14 <= $off + 188) {
+            if ($data[$idx] === "\x00" && $data[$idx + 1] === "\x00" && $data[$idx + 2] === "\x01") {
+                $pf = ord($data[$idx + 7]) & 0xC0;
+                if ($pf === 0x80) {
+                    shiftTsPts33($data, $idx + 9, $off90k);
+                } elseif ($pf === 0xC0 && $idx + 19 <= $off + 188) {
+                    shiftTsPts33($data, $idx + 9, $off90k);
+                    shiftTsPts33($data, $idx + 14, $off90k);
+                }
+            }
+        }
+    }
+    return (@file_put_contents($tsPath, $data) !== false);
+}
+
+function getHlsSegCachePath($fullVideoPath, $segIdx) {
+    return '/tmp/webplayer_sub_ram/hseg_v3_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath)) . '_' . intval($segIdx) . '.ts';
+}
+
+function buildHlsSegment($fullVideoPath, $info, $segIdx) {
+    if (!isset($info['segments'][$segIdx])) return false;
+    $seg = $info['segments'][$segIdx];
+    $isLastSeg = ($segIdx >= count($info['segments']) - 1);
+    $startSec = (float)$seg['start'];
+    $durSec = (float)$seg['dur'];
+    $startSecStr = sprintf('%.3f', max(0.0, $startSec));
+    // Trim 10ms off non-final segment duration so avconv -t stops cleanly before
+    // the next segment's IDR keyframe (prevents duplicate boundary frames on 24/30/60fps MKVs).
+    $cutDurSec = max(0.2, $durSec - 0.010);
+    $durArg = $isLastSeg ? '' : (' -t ' . sprintf('%.3f', $cutDurSec));
+    $vStream = isset($info['video_stream']) ? intval($info['video_stream']) : 0;
+    $aCodec = isset($info['audio_codec']) ? strtolower($info['audio_codec']) : '';
+    $aStream = (isset($info['audio_stream']) && $info['audio_stream'] !== null && in_array($aCodec, array('aac', 'mp3', 'ac3', 'eac3')))
+        ? intval($info['audio_stream'])
+        : -1;
+    $vCodec = isset($info['video_codec']) ? strtolower($info['video_codec']) : '';
+
+    $tmpDir = '/tmp/webplayer_sub_ram';
+    if (is_link($tmpDir)) @unlink($tmpDir);
+    if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
+
+    $segCacheFile = getHlsSegCachePath($fullVideoPath, $segIdx);
+    if (file_exists($segCacheFile) && filesize($segCacheFile) > 0) {
+        return $segCacheFile;
+    }
+
+    $lockFile = $tmpDir . '/hseg_remux.lock';
+    $lockFp = @fopen($lockFile, 'cb');
+    if ($lockFp) {
+        @flock($lockFp, LOCK_EX);
+    }
+    $ok = false;
+    if (file_exists($segCacheFile) && filesize($segCacheFile) > 0) {
+        $ok = true;
+    } else {
+        $tmpSegFile = $segCacheFile . '.' . getmypid() . '.tmp';
+        $mapArgs = '-map 0:' . $vStream;
+        if ($aStream >= 0) {
+            $mapArgs .= ' -map 0:' . $aStream;
+        }
+        $bsfArg = ($vCodec === 'h264') ? ' -bsf:v h264_mp4toannexb' : '';
+        $cmd = 'export LANG=C.UTF-8 LC_ALL=C.UTF-8 LD_LIBRARY_PATH=/usr/local/wdmcserver/lib && timeout 15 /usr/local/wdmcserver/bin/avconv -y -probesize 65536 -analyzeduration 0 -ss '
+            . $startSecStr
+            . ' -i ' . safeShellArg($fullVideoPath)
+            . $durArg
+            . ' ' . $mapArgs
+            . ' -c:v copy -c:a copy' . $bsfArg
+            . ' -f mpegts ' . safeShellArg($tmpSegFile) . ' 2>/dev/null';
+        $outLines = array();
+        $ret = 0;
+        @exec($cmd, $outLines, $ret);
+        if ($ret === 0 && file_exists($tmpSegFile) && filesize($tmpSegFile) > 0) {
+            if ($startSec > 0.001) {
+                shiftTsFileInPlace($tmpSegFile, $startSec);
+            }
+            if (@rename($tmpSegFile, $segCacheFile)) {
+                $ok = true;
+            } else {
+                @unlink($tmpSegFile);
+            }
+        } else {
+            @unlink($tmpSegFile);
+        }
+
+        // Prune stale .tmp files (>60s) and cap RAM cache to 5 recent segments (~12-16MB max in tmpfs)
+        $now = time();
+        $staleTmps = @glob($tmpDir . '/hseg_*.tmp');
+        if ($staleTmps) {
+            foreach ($staleTmps as $tf) {
+                if ($now - @filemtime($tf) > 60) @unlink($tf);
+            }
+        }
+        $segFiles = @glob($tmpDir . '/hseg_*.ts');
+        if ($segFiles && count($segFiles) > 5) {
+            usort($segFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
+            while (count($segFiles) > 5) {
+                @unlink(array_shift($segFiles));
+            }
+        }
+    }
+    if ($lockFp) {
+        @flock($lockFp, LOCK_UN);
+        @fclose($lockFp);
+    }
+    return $ok ? $segCacheFile : false;
+}
+
+// Detached non-blocking 1-segment lookahead prefetch: runs AT MOST 1 background
+// avconv job across the entire NAS (enforced by flock -n) while current segment transmits.
+function spawnHlsPrefetch($fullVideoPath, $segIdx) {
+    $segIdx = intval($segIdx);
+    if ($segIdx < 0) return;
+    $nextFile = getHlsSegCachePath($fullVideoPath, $segIdx);
+    if (file_exists($nextFile) && filesize($nextFile) > 0) return;
+    $tmpDir = '/tmp/webplayer_sub_ram';
+    if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
+    $cmd = 'nohup /usr/bin/flock -n ' . escapeshellarg($tmpDir . '/hseg_prefetch.lock')
+        . ' timeout 15 php /shares/webplayer/api.php --prefetch '
+        . safeShellArg($fullVideoPath) . ' ' . $segIdx
+        . ' </dev/null >/dev/null 2>&1 &';
+    @exec($cmd);
+}
+
+// CLI mode: background lookahead prefetch worker
+if (PHP_SAPI === 'cli' && isset($argv[1]) && $argv[1] === '--prefetch') {
+    if (isset($argv[2]) && isset($argv[3])) {
+        $rawTarget = $argv[2];
+        $idxTarget = intval($argv[3]);
+        if (!is_link($rawTarget)) {
+            $resolvedTarget = realpath($rawTarget);
+            if ($resolvedTarget !== false && isWithinBaseDir($resolvedTarget, $baseDir) && is_file($resolvedTarget)) {
+                $pInfo = getHlsInfo($resolvedTarget);
+                if (!empty($pInfo['success']) && isset($pInfo['segments'][$idxTarget])) {
+                    buildHlsSegment($resolvedTarget, $pInfo, $idxTarget);
+                }
+            }
+        }
+    }
+    exit(0);
+}
+
 // -------------------------------------------------------------
 // Action 3a: Apple HLS Master Playlist (.m3u8) for iOS Safari / AVPlayer
 // -------------------------------------------------------------
@@ -449,6 +663,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
         . "#EXT-X-INDEPENDENT-SEGMENTS\n"
         . "#EXT-X-STREAM-INF:BANDWIDTH=" . $bw . ",CODECS=\"" . $codecs . "\"" . $resAttr . "\n"
         . "api.php?action=hls_manifest&video=" . $encodedVideo . "&ext=.m3u8\n";
+
+    // Start warming up segment 0 as soon as the master playlist is fetched (non-Range)
+    if (!isset($_SERVER['HTTP_RANGE'])) {
+        spawnHlsPrefetch($fullVideoPath, 0);
+    }
 
     if (function_exists('apache_setenv')) @apache_setenv('no-gzip', '1');
     header('Content-Type: application/vnd.apple.mpegurl');
@@ -511,6 +730,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_manifest') {
     $lines[] = '#EXT-X-ENDLIST';
     $body = implode("\n", $lines) . "\n";
 
+    // Pre-warm segment 0 in background while client parses the playlist
+    spawnHlsPrefetch($fullVideoPath, 0);
+
     if (function_exists('apache_setenv')) @apache_setenv('no-gzip', '1');
     header('Content-Type: application/vnd.apple.mpegurl');
     header('Cache-Control: private, max-age=300');
@@ -521,7 +743,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_manifest') {
 
 // -------------------------------------------------------------
 // Action 4: Zero-Disk On-Demand Continuous MPEG-TS Segment Remuxer
-// (Exact Content-Length + Byte-Range 206 + Continuous PCR/PTS/DTS for iOS Safari)
+// (In-Process PHP TS Shift + Lookahead Prefetch + Byte-Range 206 for iOS Safari)
 // -------------------------------------------------------------
 if (isset($_GET['action']) && $_GET['action'] === 'hls_seg') {
     $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
@@ -551,81 +773,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_seg') {
         exit;
     }
 
-    $seg = $info['segments'][$segIdx];
-    $isLastSeg = ($segIdx >= count($info['segments']) - 1);
-    $startSec = (float)$seg['start'];
-    $durSec = (float)$seg['dur'];
-    $startSecStr = sprintf('%.3f', max(0.0, $startSec));
-    // Trim 10ms off non-final segment duration so avconv -t stops cleanly before
-    // the next segment's IDR keyframe (prevents duplicate boundary frames on 24/30/60fps MKVs).
-    $cutDurSec = max(0.2, $durSec - 0.010);
-    $durArg = $isLastSeg ? '' : (' -t ' . sprintf('%.3f', $cutDurSec));
-    $vStream = isset($info['video_stream']) ? intval($info['video_stream']) : 0;
-    $aCodec = isset($info['audio_codec']) ? strtolower($info['audio_codec']) : '';
-    $aStream = (isset($info['audio_stream']) && $info['audio_stream'] !== null && in_array($aCodec, array('aac', 'mp3', 'ac3', 'eac3')))
-        ? intval($info['audio_stream'])
-        : -1;
-    $vCodec = isset($info['video_codec']) ? strtolower($info['video_codec']) : '';
-
-    $tmpDir = '/tmp/webplayer_sub_ram';
-    if (is_link($tmpDir)) @unlink($tmpDir);
-    if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
-
-    $segCacheFile = $tmpDir . '/hseg_v3_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath)) . '_' . $segIdx . '.ts';
-    if (!file_exists($segCacheFile) || filesize($segCacheFile) === 0) {
-        $lockFile = $tmpDir . '/hseg_remux.lock';
-        $lockFp = @fopen($lockFile, 'cb');
-        if ($lockFp) {
-            @flock($lockFp, LOCK_EX);
-        }
-        // Re-check cache after acquiring lock (avoids duplicate avconv on concurrent iOS probes)
-        if (!file_exists($segCacheFile) || filesize($segCacheFile) === 0) {
-            $tmpSegFile = $segCacheFile . '.' . getmypid() . '.tmp';
-            $mapArgs = '-map 0:' . $vStream;
-            if ($aStream >= 0) {
-                $mapArgs .= ' -map 0:' . $aStream;
-            }
-            $bsfArg = ($vCodec === 'h264') ? ' -bsf:v h264_mp4toannexb' : '';
-            $cmd = 'export LANG=C.UTF-8 LC_ALL=C.UTF-8 LD_LIBRARY_PATH=/usr/local/wdmcserver/lib && timeout 15 /usr/local/wdmcserver/bin/avconv -y -probesize 65536 -analyzeduration 0 -ss '
-                . $startSecStr
-                . ' -i ' . safeShellArg($fullVideoPath)
-                . $durArg
-                . ' ' . $mapArgs
-                . ' -c:v copy -c:a copy' . $bsfArg
-                . ' -f mpegts ' . safeShellArg($tmpSegFile) . ' 2>/dev/null';
-            $outLines = array();
-            $ret = 0;
-            @exec($cmd, $outLines, $ret);
-            if ($ret !== 0 || !file_exists($tmpSegFile) || filesize($tmpSegFile) === 0) {
-                @unlink($tmpSegFile);
-                if ($lockFp) {
-                    @flock($lockFp, LOCK_UN);
-                    @fclose($lockFp);
-                }
-                header('HTTP/1.1 500 Internal Server Error');
-                echo "Remux failed";
-                exit;
-            }
-            // Shift PCR/PTS/DTS by +startSec so all segments form one continuous timeline (zero discontinuities!)
-            if ($startSec > 0.001) {
-                $shiftCmd = 'timeout 5 python /shares/webplayer/stream_sub.py ts_shift ' . safeShellArg($tmpSegFile) . ' ' . $startSecStr . ' 2>/dev/null';
-                @exec($shiftCmd, $sOut, $sRet);
-            }
-            @rename($tmpSegFile, $segCacheFile);
-
-            // Strict RAM cap: keep only the 4 most recent segments (~8-12MB max in tmpfs)
-            $segFiles = @glob($tmpDir . '/hseg_*.ts');
-            if ($segFiles && count($segFiles) > 4) {
-                usort($segFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
-                while (count($segFiles) > 4) {
-                    @unlink(array_shift($segFiles));
-                }
-            }
-        }
-        if ($lockFp) {
-            @flock($lockFp, LOCK_UN);
-            @fclose($lockFp);
-        }
+    $segCacheFile = buildHlsSegment($fullVideoPath, $info, $segIdx);
+    if ($segCacheFile === false) {
+        header('HTTP/1.1 500 Internal Server Error');
+        echo "Remux failed";
+        exit;
     }
 
     $segSize = @filesize($segCacheFile);
@@ -633,6 +785,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_seg') {
         header('HTTP/1.1 500 Internal Server Error');
         echo "Empty segment";
         exit;
+    }
+
+    // Kick off non-blocking background prefetch of seg N+1 while seg N streams over the network
+    if (!isset($_SERVER['HTTP_RANGE']) && ($segIdx + 1) < count($info['segments'])) {
+        spawnHlsPrefetch($fullVideoPath, $segIdx + 1);
     }
 
     if (function_exists('apache_setenv')) @apache_setenv('no-gzip', '1');
