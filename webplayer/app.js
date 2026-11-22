@@ -1209,17 +1209,21 @@ async function attachVideoSource(video, useHls, resumeTime = 0) {
         return;
     }
 
-    const hlsUrl = `api.php?action=hls_manifest&video=${encodeURIComponent(video.rel_path)}`;
+    const hlsUrl = `api.php?action=hls_master&video=${encodeURIComponent(video.rel_path)}&ext=.m3u8`;
     const nativeHls = videoPlayer.canPlayType('application/vnd.apple.mpegurl');
     if (nativeHls === 'probably' || nativeHls === 'maybe') {
+        videoPlayer.preload = 'auto';
         videoPlayer.src = hlsUrl;
-        if (resumeTime > 0) {
-            const onMeta = () => {
-                videoPlayer.removeEventListener('loadedmetadata', onMeta);
+        videoPlayer.load();
+        const onMeta = () => {
+            videoPlayer.removeEventListener('loadedmetadata', onMeta);
+            if (activeVideo !== video) return;
+            if (resumeTime > 0) {
                 try { videoPlayer.currentTime = resumeTime; } catch (e) {}
-            };
-            videoPlayer.addEventListener('loadedmetadata', onMeta);
-        }
+            }
+            videoPlayer.play().catch(() => {});
+        };
+        videoPlayer.addEventListener('loadedmetadata', onMeta);
         videoPlayer.play().catch(() => {});
         return;
     }
@@ -1229,9 +1233,9 @@ async function attachVideoSource(video, useHls, resumeTime = 0) {
         if (activeVideo !== video) return;
         if (HlsLib && HlsLib.isSupported()) {
             const hls = new HlsLib({
-                maxBufferLength: 20,
-                maxMaxBufferLength: 30,
-                backBufferLength: 20,
+                maxBufferLength: 12,
+                maxMaxBufferLength: 20,
+                backBufferLength: 15,
                 startPosition: resumeTime > 0 ? resumeTime : -1
             });
             activeHlsInstance = hls;

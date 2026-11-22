@@ -877,13 +877,13 @@ def probe_hls_info(video_path):
         if duration_sec <= 0 and kf_times:
             duration_sec = kf_times[-1] + 5.0
 
-        # 4. Group keyframes into ~10s HLS segments
+        # 4. Group keyframes into ~4s HLS segments (fast startup on mobile/LTE + low RAM buffer)
         segments = []
-        target_dur = 10.0
+        target_dur = 4.0
         if len(kf_times) >= 2:
             seg_start = 0.0
             for t in kf_times:
-                if t - seg_start >= 9.0:
+                if t - seg_start >= 3.5:
                     dur = round(t - seg_start, 3)
                     if dur > 0.1:
                         segments.append({"start": round(seg_start, 3), "dur": dur})
@@ -915,9 +915,68 @@ def probe_hls_info(video_path):
         except Exception: pass
         print(json.dumps({"success": False, "error": str(e)}))
 
+def shift_ts_file(ts_path, offset_sec):
+    offset_90k = int(round(float(offset_sec) * 90000.0)) & 0x1FFFFFFFF
+    if offset_90k == 0:
+        return
+    with open(ts_path, 'rb') as f:
+        data = bytearray(f.read())
+    n = len(data)
+    if n < 188:
+        return
+
+    def shift_pts(buf, pos, off90k):
+        b0 = buf[pos]
+        b1 = buf[pos + 1]
+        b2 = buf[pos + 2]
+        b3 = buf[pos + 3]
+        b4 = buf[pos + 4]
+        val = (((b0 >> 1) & 0x07) << 30) | (b1 << 22) | (((b2 >> 1) & 0x7F) << 15) | (b3 << 7) | ((b4 >> 1) & 0x7F)
+        val = (val + off90k) & 0x1FFFFFFFF
+        buf[pos]     = (b0 & 0xF1) | (((val >> 30) & 0x07) << 1)
+        buf[pos + 1] = (val >> 22) & 0xFF
+        buf[pos + 2] = (((val >> 15) & 0x7F) << 1) | 0x01
+        buf[pos + 3] = (val >> 7) & 0xFF
+        buf[pos + 4] = ((val & 0x7F) << 1) | 0x01
+
+    off = 0
+    limit = n - 187
+    while off < limit:
+        if data[off] != 0x47:
+            off += 1
+            continue
+        b1 = data[off + 1]
+        b3 = data[off + 3]
+        afc = (b3 >> 4) & 3
+        idx = off + 4
+        if afc == 2 or afc == 3:
+            af_len = data[idx]
+            if af_len >= 7 and (data[idx + 1] & 0x10):
+                p = idx + 2
+                pcr_base = (data[p] << 25) | (data[p + 1] << 17) | (data[p + 2] << 9) | (data[p + 3] << 1) | (data[p + 4] >> 7)
+                pcr_base = (pcr_base + offset_90k) & 0x1FFFFFFFF
+                data[p]     = (pcr_base >> 25) & 0xFF
+                data[p + 1] = (pcr_base >> 17) & 0xFF
+                data[p + 2] = (pcr_base >> 9) & 0xFF
+                data[p + 3] = (pcr_base >> 1) & 0xFF
+                data[p + 4] = ((pcr_base & 1) << 7) | (data[p + 4] & 0x7F)
+            idx += 1 + af_len
+        if (b1 & 0x40) and (afc == 1 or afc == 3) and idx + 14 <= off + 188:
+            if data[idx] == 0 and data[idx + 1] == 0 and data[idx + 2] == 1:
+                flags = data[idx + 7]
+                if (flags & 0xC0) == 0x80 and idx + 14 <= off + 188:
+                    shift_pts(data, idx + 9, offset_90k)
+                elif (flags & 0xC0) == 0xC0 and idx + 19 <= off + 188:
+                    shift_pts(data, idx + 9, offset_90k)
+                    shift_pts(data, idx + 14, offset_90k)
+        off += 188
+
+    with open(ts_path, 'wb') as f:
+        f.write(data)
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        sys.stderr.write("Usage: stream_sub.py probe|hls_info <video_path> OR stream_sub.py <video_path> <stream_id>\n")
+        sys.stderr.write("Usage: stream_sub.py probe|hls_info|ts_shift <path> [arg]\n")
         sys.exit(1)
     if sys.argv[1] == 'probe':
         if len(sys.argv) < 3:
@@ -927,6 +986,10 @@ if __name__ == '__main__':
         if len(sys.argv) < 3:
             sys.exit(1)
         probe_hls_info(sys.argv[2])
+    elif sys.argv[1] == 'ts_shift':
+        if len(sys.argv) < 4:
+            sys.exit(1)
+        shift_ts_file(sys.argv[2], sys.argv[3])
     else:
         if len(sys.argv) < 3:
             sys.exit(1)
