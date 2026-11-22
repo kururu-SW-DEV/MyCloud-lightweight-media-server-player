@@ -342,8 +342,17 @@ videoPlayer.addEventListener('ended', () => {
 if (prevVideoBtn) prevVideoBtn.addEventListener('click', playPrevVideo);
 if (nextVideoBtn) nextVideoBtn.addEventListener('click', playNextVideo);
 
+function isIOSDevice() {
+    const ua = navigator.userAgent || '';
+    return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 function isFullscreen() {
-    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    return !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        (videoPlayer && videoPlayer.webkitDisplayingFullscreen)
+    );
 }
 
 function enterFullscreenSafe(elem = videoPlayer) {
@@ -356,10 +365,20 @@ function enterFullscreenSafe(elem = videoPlayer) {
     // state (they don't know about div-level fullscreen). Native
     // <video>-element fullscreen is what the platform actually supports well.
     const target = elem || videoPlayer;
+    if (!target) return;
     if (target.requestFullscreen) {
         target.requestFullscreen().catch(() => {});
     } else if (target.webkitRequestFullscreen) {
         target.webkitRequestFullscreen();
+    } else if (typeof target.webkitEnterFullscreen === 'function') {
+        // iPhone Safari only supports HTMLVideoElement.webkitEnterFullscreen().
+        // Enable native WebVTT subtitle track BEFORE handing off to AVPlayerViewController.
+        syncNativeFullscreenTracks(true);
+        try {
+            target.webkitEnterFullscreen();
+        } catch (e) {
+            showToast('영상이 로드된 후 전체화면을 눌러주세요.');
+        }
     }
 }
 
@@ -368,6 +387,8 @@ function exitFullscreenSafe() {
         document.exitFullscreen().catch(() => {});
     } else if (document.webkitExitFullscreen) {
         document.webkitExitFullscreen();
+    } else if (videoPlayer && typeof videoPlayer.webkitExitFullscreen === 'function') {
+        try { videoPlayer.webkitExitFullscreen(); } catch (e) {}
     }
 }
 
@@ -517,18 +538,87 @@ function buildVttText(cues) {
 }
 
 let currentVttBlobUrl = null;
+let activeSubtitleTrackInfo = null;
 
-// Uses a real <track> element fed a WebVTT blob (rather than a bare
-// addTextTrack()/addCue() track) - this is the standards-compliant way to
-// supply native captions for fullscreen.
-//
-// NOTE: an earlier version of this player also had a Picture-in-Picture
-// button that switched to this same native track. It was removed - Chrome's
-// PiP window doesn't render captions at all, regardless of how the track is
-// supplied (see https://issues.chromium.org/issues/40581723, still open).
-// Document Picture-in-Picture (which *can* show arbitrary DOM, including our
-// custom subtitle overlay) would work around this, but requires HTTPS, which
-// this NAS doesn't serve. Don't re-add a PiP button without addressing that.
+function getNativeHlsSubtitleTracks() {
+    const list = [];
+    if (!videoPlayer || !videoPlayer.textTracks) return list;
+    for (let i = 0; i < videoPlayer.textTracks.length; i++) {
+        const t = videoPlayer.textTracks[i];
+        if (t.label !== 'WebPlayerSub' && (t.kind === 'subtitles' || t.kind === 'captions')) {
+            list.push(t);
+        }
+    }
+    return list;
+}
+
+function getWebPlayerTrack() {
+    if (!videoPlayer || !videoPlayer.textTracks) return null;
+    for (let i = 0; i < videoPlayer.textTracks.length; i++) {
+        if (videoPlayer.textTracks[i].label === 'WebPlayerSub') {
+            return videoPlayer.textTracks[i];
+        }
+    }
+    return null;
+}
+
+function syncNativeFullscreenTracks(forceFullscreen = false) {
+    if (!videoPlayer || !videoPlayer.textTracks) return;
+    const isFs = forceFullscreen || isFullscreen();
+    const wpTrack = getWebPlayerTrack();
+    const hlsTracks = getNativeHlsSubtitleTracks();
+
+    if (!isFs) {
+        // Windowed mode: suppress ALL native browser captions so our custom DOM
+        // subtitle overlay renders cleanly with zero double subtitles.
+        if (wpTrack) wpTrack.mode = 'hidden';
+        for (let i = 0; i < hlsTracks.length; i++) {
+            hlsTracks[i].mode = 'disabled';
+        }
+        return;
+    }
+
+    // Native fullscreen mode:
+    const subTurnedOff = subSelect && subSelect.value === '' && parsedSubtitles.length === 0;
+    if (subTurnedOff) {
+        if (wpTrack) wpTrack.mode = 'hidden';
+        for (let i = 0; i < hlsTracks.length; i++) {
+            hlsTracks[i].mode = 'disabled';
+        }
+        return;
+    }
+
+    // When native HLS subtitle tracks exist (injected via #EXT-X-MEDIA:TYPE=SUBTITLES
+    // for iOS AVPlayerViewController), activate the matching native HLS track!
+    if (hlsTracks.length > 0) {
+        if (wpTrack) wpTrack.mode = 'hidden';
+        let targetIdx = 0;
+        if (activeSubtitleTrackInfo) {
+            const wantExt = activeSubtitleTrackInfo.type === 'external';
+            const wantLabel = (activeSubtitleTrackInfo.label || '').toLowerCase();
+            for (let i = 0; i < hlsTracks.length; i++) {
+                const tl = (hlsTracks[i].label || '').toLowerCase();
+                if (wantExt && tl.includes('외부')) {
+                    targetIdx = i;
+                    break;
+                }
+                if (!wantExt && wantLabel && (tl === wantLabel || tl.includes(wantLabel) || wantLabel.includes(tl))) {
+                    targetIdx = i;
+                    break;
+                }
+            }
+        }
+        for (let i = 0; i < hlsTracks.length; i++) {
+            hlsTracks[i].mode = (i === targetIdx) ? 'showing' : 'disabled';
+        }
+    } else if (wpTrack) {
+        wpTrack.mode = 'showing';
+    }
+}
+
+// Uses a real <track> element (HTTP WebVTT on iOS direct MP4, WebVTT blob on
+// desktop/Android) for native fullscreen captions; on iOS HLS, native
+// #EXT-X-MEDIA:TYPE=SUBTITLES tracks inside hls_master take over seamlessly.
 function syncCuesToTextTrack() {
     if (!videoPlayer) return;
     const trackEl = document.getElementById('webplayer-native-track');
@@ -536,9 +626,7 @@ function syncCuesToTextTrack() {
 
     if (!trackEl._hasLoadSyncListener) {
         trackEl.addEventListener('load', () => {
-            if (trackEl.track) {
-                trackEl.track.mode = isFullscreen() ? 'showing' : 'hidden';
-            }
+            syncNativeFullscreenTracks(false);
         });
         trackEl._hasLoadSyncListener = true;
     }
@@ -550,48 +638,48 @@ function syncCuesToTextTrack() {
 
     if (parsedSubtitles.length === 0) {
         trackEl.removeAttribute('src');
+        syncNativeFullscreenTracks(false);
+        return;
+    }
+
+    // On iOS Safari playing native HLS, AVPlayerViewController uses the native
+    // #EXT-X-MEDIA:TYPE=SUBTITLES tracks from hls_master (blob: tracks are ignored
+    // by AVPlayer and can cause duplicate/empty track entries in iOS CC menu).
+    const nativeHlsTracks = getNativeHlsSubtitleTracks();
+    if (isIOSDevice() && isHlsRemuxActive && nativeHlsTracks.length > 0) {
+        trackEl.removeAttribute('src');
+        syncNativeFullscreenTracks(false);
+        return;
+    }
+
+    // On iOS Safari playing direct MP4 (non-HLS), use our server-side HTTP WebVTT
+    // endpoint instead of blob: because AVPlayerViewController cannot read blob: URLs!
+    if (isIOSDevice() && activeSubtitleTrackInfo && activeSubtitleTrackInfo.type === 'external' && activeSubtitleTrackInfo.subRel) {
+        const offParam = subtitleOffset !== 0 ? `&offset=${encodeURIComponent(subtitleOffset.toFixed(2))}` : '';
+        trackEl.src = `api.php?action=hls_sub_vtt&src=ext&sub=${encodeURIComponent(activeSubtitleTrackInfo.subRel)}${offParam}&ext=.vtt`;
+        syncNativeFullscreenTracks(false);
         return;
     }
 
     const blob = new Blob([buildVttText(parsedSubtitles)], { type: 'text/vtt' });
     currentVttBlobUrl = URL.createObjectURL(blob);
     trackEl.src = currentVttBlobUrl;
-
-    // Reassigning `src` resets the track's mode to "disabled" - reapply
-    // whatever visibility state we're currently in (fullscreen uses the
-    // native track; the windowed player uses the custom DOM overlay instead).
-    if (trackEl.track) {
-        trackEl.track.mode = isFullscreen() ? 'showing' : 'hidden';
-    }
+    syncNativeFullscreenTracks(false);
 }
 
 function handleFullscreenSubtitleSync() {
-    let track = null;
-    if (videoPlayer && videoPlayer.textTracks) {
-        for (let i = 0; i < videoPlayer.textTracks.length; i++) {
-            if (videoPlayer.textTracks[i].label === 'WebPlayerSub') {
-                track = videoPlayer.textTracks[i];
-                break;
-            }
-        }
-    }
-    
     const isFs = isFullscreen();
+    syncNativeFullscreenTracks(isFs);
     if (isFs) {
-        // Native video element fullscreen: show native WebVTT cues mirroring custom settings
-        if (track) track.mode = "showing";
         if (subtitleBox) subtitleBox.style.display = "none";
     } else {
-        // Windowed floating player: hide native cues, show rich DOM overlay
-        if (track) track.mode = "hidden";
         updateSubtitleDisplay();
     }
     applySubtitleStyle();
 }
 
 function handleFullscreenChange() {
-    const fsElem = document.fullscreenElement || document.webkitFullscreenElement;
-    const isFs = !!fsElem;
+    const isFs = isFullscreen();
 
     // See the .video-wrapper:fullscreen rule in style.css for why this class
     // exists - it's a defensive backstop against a stray white sliver some
@@ -611,6 +699,29 @@ function handleFullscreenChange() {
 
 document.addEventListener('fullscreenchange', handleFullscreenChange);
 document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+if (videoPlayer) {
+    // iPhone Safari fires webkitbeginfullscreen / webkitendfullscreen on <video>
+    // instead of document fullscreenchange!
+    videoPlayer.addEventListener('webkitbeginfullscreen', () => {
+        handleFullscreenChange();
+        // Re-assert native subtitle track after AVPlayerViewController finishes opening
+        setTimeout(() => {
+            if (isFullscreen()) syncNativeFullscreenTracks(true);
+        }, 180);
+    });
+    videoPlayer.addEventListener('webkitendfullscreen', () => {
+        handleFullscreenChange();
+        setTimeout(() => {
+            if (!isFullscreen()) handleFullscreenSubtitleSync();
+        }, 120);
+    });
+    if (videoPlayer.textTracks && typeof videoPlayer.textTracks.addEventListener === 'function') {
+        videoPlayer.textTracks.addEventListener('addtrack', () => {
+            handleFullscreenSubtitleSync();
+        });
+    }
+}
 
 let lastDisplayedText = null;
 let lastDisplayedPosTop = null;
@@ -1314,10 +1425,12 @@ window.openPlayer = async function(encodedRelPath) {
     currentAvailableTracks = [];
     if (video.subtitles && video.subtitles.length > 0) {
         video.subtitles.forEach(s => {
+            const subRel = (video.folder ? `${video.folder}/` : '') + s.filename;
             currentAvailableTracks.push({
                 type: 'external',
                 label: `[외부-${s.ext.toUpperCase()}] ${s.filename}`,
                 url: s.url,
+                subRel: subRel,
                 ext: s.ext,
                 lang: s.ext
             });
@@ -1448,6 +1561,7 @@ let currentSubAbortController = null;
 async function loadSelectedTrack(track) {
     clearSubtitles();
     if (!track) return;
+    activeSubtitleTrackInfo = track;
     // Snapshot which video this load was requested for. loadSelectedTrack is
     // async (and the cache branch below can still interleave with a fast
     // prev/next click via microtask ordering) - without this check, a track
@@ -1573,6 +1687,7 @@ async function loadSelectedTrack(track) {
 }
 
 function clearSubtitles() {
+    activeSubtitleTrackInfo = null;
     if (currentSubAbortController) {
         try { currentSubAbortController.abort(); } catch (e) {}
         currentSubAbortController = null;
@@ -1611,6 +1726,7 @@ function clearSubtitles() {
             }
         }
     }
+    syncNativeFullscreenTracks(false);
 }
 
 subSelect.addEventListener('change', () => {

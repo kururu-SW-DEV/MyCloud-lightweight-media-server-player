@@ -669,7 +669,298 @@ function serveMemoryResponse($body, $contentType, $cacheControl, $allowGzip = fa
 }
 
 // -------------------------------------------------------------
-// Action 3a: Apple HLS Master Playlist (.m3u8) (Backward compatibility)
+// Helpers: Native Apple HLS WebVTT Subtitle Engine
+// (Converts external SMI/SRT/ASS/VTT & embedded MKV ASS/SRT to UTF-8 WebVTT
+//  for iOS Safari AVPlayerViewController native fullscreen & CC menu!)
+// -------------------------------------------------------------
+function decodeSubtitleToUtf8($raw) {
+    if ($raw === '' || $raw === false) return '';
+    $len = strlen($raw);
+    if ($len >= 2 && $raw[0] === "\xFF" && $raw[1] === "\xFE") {
+        $conv = @iconv('UTF-16LE', 'UTF-8//IGNORE', substr($raw, 2));
+        return ($conv !== false) ? $conv : $raw;
+    }
+    if ($len >= 2 && $raw[0] === "\xFE" && $raw[1] === "\xFF") {
+        $conv = @iconv('UTF-16BE', 'UTF-8//IGNORE', substr($raw, 2));
+        return ($conv !== false) ? $conv : $raw;
+    }
+    if ($len >= 3 && $raw[0] === "\xEF" && $raw[1] === "\xBB" && $raw[2] === "\xBF") {
+        return substr($raw, 3);
+    }
+    if (preg_match('//u', $raw)) {
+        return $raw;
+    }
+    $conv = @iconv('CP949', 'UTF-8//IGNORE', $raw);
+    if ($conv !== false && $conv !== '') return $conv;
+    $conv2 = @iconv('EUC-KR', 'UTF-8//IGNORE', $raw);
+    return ($conv2 !== false && $conv2 !== '') ? $conv2 : $raw;
+}
+
+function formatVttTimestamp($sec) {
+    if (!is_finite($sec) || $sec < 0.0) $sec = 0.0;
+    $totalMs = (int)round($sec * 1000.0);
+    $ms = $totalMs % 1000;
+    $totalSec = (int)floor($totalMs / 1000);
+    $s = $totalSec % 60;
+    $totalMin = (int)floor($totalSec / 60);
+    $m = $totalMin % 60;
+    $h = (int)floor($totalMin / 60);
+    return sprintf('%02d:%02d:%02d.%03d', $h, $m, $s, $ms);
+}
+
+function cleanVttLineText($txt) {
+    $txt = html_entity_decode($txt, ENT_QUOTES | ENT_HTML401, 'UTF-8');
+    $txt = str_replace("\xC2\xA0", ' ', $txt); // NBSP -> space
+    $txt = str_replace("\r\n", "\n", $txt);
+    $txt = str_replace("\r", "\n", $txt);
+    $lines = explode("\n", $txt);
+    $out = array();
+    foreach ($lines as $ln) {
+        $ln = trim(preg_replace('/[ \t]+/', ' ', $ln));
+        if ($ln !== '') $out[] = $ln;
+    }
+    $joined = implode("\n", $out);
+    if ($joined === '') return '';
+    // Escape WebVTT markup characters in dialogue text
+    return str_replace(array('&', '<', '>'), array('&amp;', '&lt;', '&gt;'), $joined);
+}
+
+function parseClockTimeToSec($str) {
+    $str = trim($str);
+    if (!preg_match('/^(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:[.,](\d{1,3}))?/', $str, $m)) return -1.0;
+    $h = ($m[1] !== '') ? (int)$m[1] : 0;
+    $min = (int)$m[2];
+    $sec = (int)$m[3];
+    $msStr = isset($m[4]) ? str_pad($m[4], 3, '0') : '000';
+    return $h * 3600.0 + $min * 60.0 + $sec + ((int)$msStr) / 1000.0;
+}
+
+function convertSubContentToVtt($rawBytes, $ext, $mpegtsOffset = 0, $syncOffset = 0.0) {
+    $text = decodeSubtitleToUtf8($rawBytes);
+    $ext = strtolower($ext);
+    $cues = array(); // each: array(start, end, text)
+
+    if ($ext === 'smi' || $ext === 'sami') {
+        $text = preg_replace('/<!--.*?-->/s', '', $text);
+        if (preg_match_all('/<SYNC\b[^>]*\bStart\s*=\s*["\']?(-?\d+)["\']?[^>]*>(.*?)(?=<SYNC\b|<\/BODY|<\/SAMI|$)/is', $text, $matches, PREG_SET_ORDER)) {
+            $rawItems = array();
+            foreach ($matches as $m) {
+                $startSec = ((float)$m[1]) / 1000.0;
+                $body = $m[2];
+                $body = preg_replace('/<br\s*\/?>/i', "\n", $body);
+                $body = preg_replace('/<\/p\s*>/i', "\n", $body);
+                $body = strip_tags($body);
+                $clean = cleanVttLineText($body);
+                $rawItems[] = array($startSec, $clean);
+            }
+            $n = count($rawItems);
+            for ($i = 0; $i < $n; $i++) {
+                $st = $rawItems[$i][0];
+                $txt = $rawItems[$i][1];
+                if ($txt === '') continue;
+                $en = ($i + 1 < $n) ? $rawItems[$i + 1][0] : ($st + 5.0);
+                if ($en <= $st + 0.05) $en = $st + 3.0;
+                if ($en - $st > 15.0) $en = $st + 10.0;
+                $cues[] = array($st, $en, $txt);
+            }
+        }
+    } elseif ($ext === 'ass' || $ext === 'ssa') {
+        $lines = preg_split('/\r\n|\r|\n/', $text);
+        $textIdx = 9;
+        $startIdx = 1;
+        $endIdx = 2;
+        foreach ($lines as $ln) {
+            if (stripos($ln, 'Format:') === 0 && stripos($ln, 'Text') !== false && stripos($ln, 'Start') !== false) {
+                $cols = array_map('trim', explode(',', substr($ln, 7)));
+                foreach ($cols as $ci => $cn) {
+                    $cl = strtolower($cn);
+                    if ($cl === 'start') $startIdx = $ci;
+                    elseif ($cl === 'end') $endIdx = $ci;
+                    elseif ($cl === 'text') $textIdx = $ci;
+                }
+            } elseif (stripos($ln, 'Dialogue:') === 0) {
+                $parts = explode(',', substr($ln, 9), $textIdx + 1);
+                if (count($parts) > $textIdx) {
+                    $st = parseClockTimeToSec($parts[$startIdx]);
+                    $en = parseClockTimeToSec($parts[$endIdx]);
+                    if ($st >= 0.0 && $en > $st) {
+                        $body = $parts[$textIdx];
+                        // Skip ASS vector drawing commands ({\p1}...{\p0})
+                        if (preg_match('/\\\\p[1-9]/', $body)) continue;
+                        $body = preg_replace('/\{[^}]*\}/', '', $body);
+                        $body = str_replace(array('\\N', '\\n', '\\h'), array("\n", "\n", ' '), $body);
+                        $clean = cleanVttLineText($body);
+                        if ($clean !== '') {
+                            $cues[] = array($st, $en, $clean);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // SRT or WebVTT
+        $blocks = preg_split('/\r?\n\r?\n/', trim($text));
+        foreach ($blocks as $blk) {
+            $lines = preg_split('/\r?\n/', trim($blk));
+            if (count($lines) < 2) continue;
+            $timeLineIdx = -1;
+            foreach ($lines as $li => $l) {
+                if (strpos($l, '-->') !== false) {
+                    $timeLineIdx = $li;
+                    break;
+                }
+            }
+            if ($timeLineIdx === -1) continue;
+            $tParts = explode('-->', $lines[$timeLineIdx]);
+            if (count($tParts) < 2) continue;
+            $st = parseClockTimeToSec($tParts[0]);
+            $en = parseClockTimeToSec($tParts[1]);
+            if ($st < 0.0 || $en <= $st) continue;
+            $bodyLines = array_slice($lines, $timeLineIdx + 1);
+            $body = implode("\n", $bodyLines);
+            $body = preg_replace('/<br\s*\/?>/i', "\n", $body);
+            $body = preg_replace('/\{[^}]*\}/', '', $body);
+            $body = strip_tags($body);
+            $clean = cleanVttLineText($body);
+            if ($clean !== '') {
+                $cues[] = array($st, $en, $clean);
+            }
+        }
+    }
+
+    usort($cues, function($a, $b) {
+        if ($a[0] == $b[0]) return ($a[1] < $b[1]) ? -1 : 1;
+        return ($a[0] < $b[0]) ? -1 : 1;
+    });
+
+    $vtt = "WEBVTT\n";
+    if ($mpegtsOffset > 0) {
+        $vtt .= "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:" . intval($mpegtsOffset) . "\n";
+    }
+    $vtt .= "\n";
+
+    $cueIdx = 1;
+    foreach ($cues as $c) {
+        $st = max(0.0, $c[0] + $syncOffset);
+        $en = max($st + 0.1, $c[1] + $syncOffset);
+        $vtt .= $cueIdx . "\n" . formatVttTimestamp($st) . " --> " . formatVttTimestamp($en) . "\n" . $c[2] . "\n\n";
+        $cueIdx++;
+    }
+    return $vtt;
+}
+
+function normalizeIsoLang2($lang, $label = '') {
+    $l = strtolower(trim((string)$lang));
+    if (in_array($l, array('kor', 'ko', 'korean'))) return 'ko';
+    if (in_array($l, array('eng', 'en', 'english'))) return 'en';
+    if (in_array($l, array('jpn', 'ja', 'japanese'))) return 'ja';
+    if (in_array($l, array('chi', 'zho', 'zh', 'chinese'))) return 'zh';
+    if (strlen($l) === 2 && ctype_alpha($l)) return $l;
+    $lbl = strtolower((string)$label);
+    if (strpos($lbl, '한국어') !== false || strpos($lbl, 'kor') !== false) return 'ko';
+    if (strpos($lbl, 'english') !== false || strpos($lbl, '영어') !== false) return 'en';
+    if (strpos($lbl, '일본어') !== false || strpos($lbl, 'jpn') !== false) return 'ja';
+    return 'und';
+}
+
+function collectHlsSubtitleTracks($fullVideoPath, $videoRel, $baseDir) {
+    global $subExts;
+    $tracks = array();
+    $dir = dirname($fullVideoPath);
+    $vidBase = pathinfo($fullVideoPath, PATHINFO_FILENAME);
+    $vLen = strlen($vidBase);
+    $relDir = dirname($videoRel);
+    if ($relDir === '.' || $relDir === '/' || $relDir === '\\') $relDir = '';
+
+    // 1. External matching subtitle files in the same folder
+    $items = @scandir($dir);
+    if ($items !== false) {
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') continue;
+            $ext = strtolower(pathinfo($item, PATHINFO_EXTENSION));
+            if (!in_array($ext, $subExts)) continue;
+            $subBase = pathinfo($item, PATHINFO_FILENAME);
+            if (!isMatchingSubtitleBase($subBase, $vidBase, $vLen)) continue;
+            $subFull = $dir . '/' . $item;
+            if (!is_file($subFull) || is_link($subFull)) continue;
+            $subRel = ($relDir !== '' ? ($relDir . '/') : '') . $item;
+            $low = strtolower($item);
+            $lang = 'ko';
+            if (strpos($low, '.en.') !== false || strpos($low, '_en.') !== false || strpos($low, '.eng.') !== false) $lang = 'en';
+            elseif (strpos($low, '.jp.') !== false || strpos($low, '.jpn.') !== false || strpos($low, '.ja.') !== false) $lang = 'ja';
+            $tracks[] = array(
+                'type' => 'ext',
+                'name' => '외부 ' . strtoupper($ext) . ' 자막',
+                'lang' => $lang,
+                'sub_rel' => $subRel,
+                'is_kor' => ($lang === 'ko') ? 0 : 1
+            );
+        }
+    }
+
+    // 2. Embedded MKV subtitle tracks (cached via probe_*.json, < 10ms)
+    $extVid = strtolower(pathinfo($fullVideoPath, PATHINFO_EXTENSION));
+    if ($extVid === 'mkv') {
+        $tmpDir = '/tmp/webplayer_sub_ram';
+        if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
+        $probeCache = $tmpDir . '/probe_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath)) . '.json';
+        $probeData = null;
+        if (file_exists($probeCache) && filesize($probeCache) > 0) {
+            $probeData = @json_decode(@file_get_contents($probeCache), true);
+        }
+        if (!is_array($probeData) || empty($probeData['success'])) {
+            $out = @shell_exec('timeout 4 python /shares/webplayer/stream_sub.py probe ' . safeShellArg($fullVideoPath) . ' 2>/dev/null');
+            if (!empty($out)) {
+                $parsed = @json_decode($out, true);
+                if (is_array($parsed) && !empty($parsed['success'])) {
+                    @file_put_contents($probeCache, $out);
+                    $probeData = $parsed;
+                }
+            }
+        }
+        if (is_array($probeData) && !empty($probeData['subtitles'])) {
+            foreach ($probeData['subtitles'] as $es) {
+                $label = !empty($es['label']) ? str_replace(array('"', "\r", "\n"), '', $es['label']) : ('내장 자막 #' . intval($es['stream_id']));
+                $lang2 = normalizeIsoLang2(isset($es['lang']) ? $es['lang'] : 'und', $label);
+                $tracks[] = array(
+                    'type' => 'emb',
+                    'name' => $label,
+                    'lang' => $lang2,
+                    'stream' => intval($es['stream_id']),
+                    'codec' => !empty($es['codec']) ? strtoupper($es['codec']) : 'SRT',
+                    'is_kor' => ($lang2 === 'ko') ? 0 : 1
+                );
+            }
+        }
+    }
+
+    // Prioritize Korean external > other external > Korean embedded > other embedded
+    usort($tracks, function($a, $b) {
+        $aExt = ($a['type'] === 'ext') ? 0 : 1;
+        $bExt = ($b['type'] === 'ext') ? 0 : 1;
+        if ($a['is_kor'] !== $b['is_kor']) return $a['is_kor'] - $b['is_kor'];
+        return $aExt - $bExt;
+    });
+
+    // Ensure unique NAMEs in HLS Master Playlist (Apple AVPlayer requires unique NAME per GROUP-ID)
+    $usedNames = array();
+    foreach ($tracks as $i => &$tr) {
+        $baseName = $tr['name'];
+        $name = $baseName;
+        $n = 2;
+        while (isset($usedNames[$name])) {
+            $name = $baseName . ' (' . $n . ')';
+            $n++;
+        }
+        $usedNames[$name] = true;
+        $tr['name'] = $name;
+    }
+    unset($tr);
+    return $tracks;
+}
+
+// -------------------------------------------------------------
+// Action 3a: Apple HLS Master Playlist (.m3u8) with Native WebVTT Subtitles
 // -------------------------------------------------------------
 if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
     $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
@@ -693,6 +984,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
 
     $encodedVideo = rawurlencode($videoRel);
     $fsize = (float)getSafeFileSize($fullVideoPath);
+    $subTracks = collectHlsSubtitleTracks($fullVideoPath, $videoRel, $baseDir);
 
     // Fast path: Pure-PHP HLS v7 fMP4
     $fmp4Idx = function_exists('fmp4GetIndex') ? fmp4GetIndex($fullVideoPath) : false;
@@ -702,10 +994,27 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
         $codecs = $fmp4Idx['v']['rfc'];
         if (!empty($fmp4Idx['a']['rfc'])) $codecs .= ',' . $fmp4Idx['a']['rfc'];
         $resAttr = ',RESOLUTION=' . intval($fmp4Idx['v']['w']) . 'x' . intval($fmp4Idx['v']['h']);
+
+        $subLines = '';
+        $subGroupAttr = '';
+        if (!empty($subTracks)) {
+            $subGroupAttr = ',SUBTITLES="subs"';
+            foreach ($subTracks as $ti => $tr) {
+                $defStr = ($ti === 0) ? 'YES' : 'NO';
+                if ($tr['type'] === 'ext') {
+                    $subUri = 'api.php?action=hls_sub_m3u8&video=' . $encodedVideo . '&src=ext&sub=' . rawurlencode($tr['sub_rel']) . '&dur=' . sprintf('%.3f', $dur) . '&ts=0&ext=.m3u8';
+                } else {
+                    $subUri = 'api.php?action=hls_sub_m3u8&video=' . $encodedVideo . '&src=emb&stream=' . intval($tr['stream']) . '&codec=' . rawurlencode($tr['codec']) . '&dur=' . sprintf('%.3f', $dur) . '&ts=0&ext=.m3u8';
+                }
+                $subLines .= '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="' . $tr['name'] . '",DEFAULT=' . $defStr . ',AUTOSELECT=YES,FORCED=NO,LANGUAGE="' . $tr['lang'] . '",URI="' . $subUri . "\"\n";
+            }
+        }
+
         $body = "#EXTM3U\n"
             . "#EXT-X-VERSION:7\n"
             . "#EXT-X-INDEPENDENT-SEGMENTS\n"
-            . "#EXT-X-STREAM-INF:BANDWIDTH=" . $bw . ",CODECS=\"" . $codecs . "\"" . $resAttr . "\n"
+            . $subLines
+            . "#EXT-X-STREAM-INF:BANDWIDTH=" . $bw . ",CODECS=\"" . $codecs . "\"" . $resAttr . $subGroupAttr . "\n"
             . "api.php?action=hls_manifest&video=" . $encodedVideo . "&ext=.m3u8\n";
         serveMemoryResponse($body, 'application/vnd.apple.mpegurl', 'private, max-age=300', false);
     }
@@ -733,16 +1042,163 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
         $resAttr = ',RESOLUTION=' . intval($info['width']) . 'x' . intval($info['height']);
     }
 
+    $subLines = '';
+    $subGroupAttr = '';
+    if (!empty($subTracks)) {
+        $subGroupAttr = ',SUBTITLES="subs"';
+        foreach ($subTracks as $ti => $tr) {
+            $defStr = ($ti === 0) ? 'YES' : 'NO';
+            if ($tr['type'] === 'ext') {
+                $subUri = 'api.php?action=hls_sub_m3u8&video=' . $encodedVideo . '&src=ext&sub=' . rawurlencode($tr['sub_rel']) . '&dur=' . sprintf('%.3f', $dur) . '&ts=1&ext=.m3u8';
+            } else {
+                $subUri = 'api.php?action=hls_sub_m3u8&video=' . $encodedVideo . '&src=emb&stream=' . intval($tr['stream']) . '&codec=' . rawurlencode($tr['codec']) . '&dur=' . sprintf('%.3f', $dur) . '&ts=1&ext=.m3u8';
+            }
+            $subLines .= '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="' . $tr['name'] . '",DEFAULT=' . $defStr . ',AUTOSELECT=YES,FORCED=NO,LANGUAGE="' . $tr['lang'] . '",URI="' . $subUri . "\"\n";
+        }
+    }
+
     $body = "#EXTM3U\n"
         . "#EXT-X-VERSION:3\n"
         . "#EXT-X-INDEPENDENT-SEGMENTS\n"
-        . "#EXT-X-STREAM-INF:BANDWIDTH=" . $bw . ",CODECS=\"" . $codecs . "\"" . $resAttr . "\n"
+        . $subLines
+        . "#EXT-X-STREAM-INF:BANDWIDTH=" . $bw . ",CODECS=\"" . $codecs . "\"" . $resAttr . $subGroupAttr . "\n"
         . "api.php?action=hls_manifest&video=" . $encodedVideo . "&ext=.m3u8\n";
 
     if (!isset($_SERVER['HTTP_RANGE'])) {
         spawnHlsPrefetch($fullVideoPath, 0);
     }
     serveMemoryResponse($body, 'application/vnd.apple.mpegurl', 'private, max-age=300', false);
+}
+
+// -------------------------------------------------------------
+// Action 3e: HLS WebVTT Subtitle Media Playlist (.m3u8)
+// -------------------------------------------------------------
+if (isset($_GET['action']) && $_GET['action'] === 'hls_sub_m3u8') {
+    $src = isset($_GET['src']) ? $_GET['src'] : '';
+    $dur = isset($_GET['dur']) ? max(1.0, (float)$_GET['dur']) : 3600.0;
+    $tsFlag = (!empty($_GET['ts']) && $_GET['ts'] == '1') ? '1' : '0';
+    $vttUrl = '';
+    if ($src === 'ext') {
+        $subRel = isset($_GET['sub']) ? trim($_GET['sub'], " /\\") : '';
+        if (empty($subRel) || !validateRelativePath($subRel)) {
+            header('HTTP/1.1 400 Bad Request');
+            exit;
+        }
+        $vttUrl = 'api.php?action=hls_sub_vtt&src=ext&sub=' . rawurlencode($subRel) . '&ts=' . $tsFlag . '&ext=.vtt';
+    } elseif ($src === 'emb') {
+        $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
+        $stream = isset($_GET['stream']) ? intval($_GET['stream']) : -1;
+        $codec = isset($_GET['codec']) ? preg_replace('/[^a-zA-Z0-9]/', '', $_GET['codec']) : 'SRT';
+        if (empty($videoRel) || !validateRelativePath($videoRel) || $stream < 0) {
+            header('HTTP/1.1 400 Bad Request');
+            exit;
+        }
+        $vttUrl = 'api.php?action=hls_sub_vtt&src=emb&video=' . rawurlencode($videoRel) . '&stream=' . $stream . '&codec=' . rawurlencode($codec) . '&ts=' . $tsFlag . '&ext=.vtt';
+    } else {
+        header('HTTP/1.1 400 Bad Request');
+        exit;
+    }
+    $targetDur = (int)ceil($dur);
+    $body = "#EXTM3U\n"
+        . "#EXT-X-VERSION:3\n"
+        . "#EXT-X-TARGETDURATION:" . $targetDur . "\n"
+        . "#EXT-X-MEDIA-SEQUENCE:0\n"
+        . "#EXT-X-PLAYLIST-TYPE:VOD\n"
+        . sprintf("#EXTINF:%.3f,\n", $dur)
+        . $vttUrl . "\n"
+        . "#EXT-X-ENDLIST\n";
+    serveMemoryResponse($body, 'application/vnd.apple.mpegurl', 'private, max-age=300', false);
+}
+
+// -------------------------------------------------------------
+// Action 3f: Native UTF-8 WebVTT Subtitle Converter & Endpoint (.vtt)
+// Used by both HLS #EXT-X-MEDIA:TYPE=SUBTITLES and direct MP4 <track> on iOS!
+// -------------------------------------------------------------
+if (isset($_GET['action']) && $_GET['action'] === 'hls_sub_vtt') {
+    $src = isset($_GET['src']) ? $_GET['src'] : '';
+    $mpegtsOffset = (!empty($_GET['ts']) && $_GET['ts'] == '1') ? 126000 : 0; // 1.400s * 90kHz for MPEG-TS fallback
+    $syncOffset = isset($_GET['offset']) ? max(-60.0, min(60.0, (float)$_GET['offset'])) : 0.0;
+    $tmpDir = '/tmp/webplayer_sub_ram';
+    if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
+
+    if ($src === 'ext') {
+        $subRel = isset($_GET['sub']) ? trim($_GET['sub'], " /\\") : '';
+        if (empty($subRel) || !validateRelativePath($subRel)) {
+            header('HTTP/1.1 400 Bad Request');
+            exit;
+        }
+        $rawPath = $baseDir . '/' . $subRel;
+        if (is_link($rawPath)) {
+            header('HTTP/1.1 403 Forbidden');
+            exit;
+        }
+        $fullSubPath = realpath($rawPath);
+        if ($fullSubPath === false || !isWithinBaseDir($fullSubPath, $baseDir) || !is_file($fullSubPath)) {
+            header('HTTP/1.1 404 Not Found');
+            exit;
+        }
+        $ext = strtolower(pathinfo($fullSubPath, PATHINFO_EXTENSION));
+        if (!in_array($ext, $subExts)) {
+            header('HTTP/1.1 403 Forbidden');
+            exit;
+        }
+        $vttCache = $tmpDir . '/vtt_ext_' . md5($fullSubPath . ':' . @filemtime($fullSubPath) . ':' . $mpegtsOffset . ':' . sprintf('%.2f', $syncOffset)) . '.vtt';
+        if (file_exists($vttCache) && filesize($vttCache) > 0) {
+            $vtt = @file_get_contents($vttCache);
+        } else {
+            $rawSub = @file_get_contents($fullSubPath);
+            $vtt = convertSubContentToVtt($rawSub !== false ? $rawSub : '', $ext, $mpegtsOffset, $syncOffset);
+            @file_put_contents($vttCache, $vtt);
+        }
+        serveMemoryResponse($vtt, 'text/vtt; charset=utf-8', 'private, max-age=300', true);
+    } elseif ($src === 'emb') {
+        $videoRel = isset($_GET['video']) ? trim($_GET['video'], " /\\") : '';
+        $stream = isset($_GET['stream']) ? intval($_GET['stream']) : -1;
+        $codec = isset($_GET['codec']) ? strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $_GET['codec'])) : 'srt';
+        if (empty($videoRel) || !validateRelativePath($videoRel) || $stream < 0) {
+            header('HTTP/1.1 400 Bad Request');
+            exit;
+        }
+        $rawPath = $baseDir . '/' . $videoRel;
+        if (is_link($rawPath)) {
+            header('HTTP/1.1 403 Forbidden');
+            exit;
+        }
+        $fullVideoPath = realpath($rawPath);
+        if ($fullVideoPath === false || !isWithinBaseDir($fullVideoPath, $baseDir) || !is_file($fullVideoPath)) {
+            header('HTTP/1.1 404 Not Found');
+            exit;
+        }
+        $vttCache = $tmpDir . '/vtt_emb_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath) . ':' . $stream . ':' . $mpegtsOffset . ':' . sprintf('%.2f', $syncOffset)) . '.vtt';
+        if (file_exists($vttCache) && filesize($vttCache) > 0) {
+            $vtt = @file_get_contents($vttCache);
+        } else {
+            // Reuse stream_sub RAM cache if already extracted, otherwise extract cleanly
+            $rawSubCache = $tmpDir . '/' . md5($fullVideoPath . ':' . $stream . ':' . @filemtime($fullVideoPath)) . '.' . $codec;
+            if (file_exists($rawSubCache) && filesize($rawSubCache) > 0) {
+                $rawSub = @file_get_contents($rawSubCache);
+            } else {
+                $cmd = 'export LANG=C.UTF-8 LC_ALL=C.UTF-8 LD_LIBRARY_PATH=/usr/local/wdmcserver/lib && timeout 15 python /shares/webplayer/stream_sub.py ' . safeShellArg($fullVideoPath) . ' ' . $stream . ' 2>/dev/null';
+                $rawSub = @shell_exec($cmd);
+                if (!empty($rawSub)) {
+                    @file_put_contents($rawSubCache, $rawSub);
+                }
+            }
+            $vtt = convertSubContentToVtt(!empty($rawSub) ? $rawSub : '', $codec, $mpegtsOffset, $syncOffset);
+            @file_put_contents($vttCache, $vtt);
+        }
+        // Prune vtt cache to max 20 files
+        $vttFiles = @glob($tmpDir . '/vtt_*.vtt');
+        if ($vttFiles && count($vttFiles) > 20) {
+            usort($vttFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
+            while (count($vttFiles) > 15) {
+                @unlink(array_shift($vttFiles));
+            }
+        }
+        serveMemoryResponse($vtt, 'text/vtt; charset=utf-8', 'private, max-age=300', true);
+    }
+    header('HTTP/1.1 400 Bad Request');
+    exit;
 }
 
 // -------------------------------------------------------------
