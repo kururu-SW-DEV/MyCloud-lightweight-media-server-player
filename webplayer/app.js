@@ -1143,6 +1143,7 @@ let activeHlsInstance = null;
 let isHlsRemuxActive = false;
 let hlsAutoFallbackAttempted = false;
 let _hlsScriptPromise = null;
+let activeNativeMetaHandler = null;
 
 function browserNeedsMkvRemux() {
     const ua = navigator.userAgent || '';
@@ -1153,6 +1154,10 @@ function browserNeedsMkvRemux() {
 }
 
 function destroyHlsInstance() {
+    if (activeNativeMetaHandler && videoPlayer) {
+        videoPlayer.removeEventListener('loadedmetadata', activeNativeMetaHandler);
+        activeNativeMetaHandler = null;
+    }
     if (activeHlsInstance) {
         try { activeHlsInstance.destroy(); } catch (e) {}
         activeHlsInstance = null;
@@ -1214,16 +1219,17 @@ async function attachVideoSource(video, useHls, resumeTime = 0) {
     if (nativeHls === 'probably' || nativeHls === 'maybe') {
         videoPlayer.preload = 'auto';
         videoPlayer.src = hlsUrl;
-        videoPlayer.load();
-        const onMeta = () => {
-            videoPlayer.removeEventListener('loadedmetadata', onMeta);
-            if (activeVideo !== video) return;
-            if (resumeTime > 0) {
+        if (resumeTime > 0) {
+            const onMeta = () => {
+                videoPlayer.removeEventListener('loadedmetadata', onMeta);
+                if (activeNativeMetaHandler === onMeta) activeNativeMetaHandler = null;
+                if (activeVideo !== video) return;
                 try { videoPlayer.currentTime = resumeTime; } catch (e) {}
-            }
-            videoPlayer.play().catch(() => {});
-        };
-        videoPlayer.addEventListener('loadedmetadata', onMeta);
+                if (videoPlayer.paused) videoPlayer.play().catch(() => {});
+            };
+            activeNativeMetaHandler = onMeta;
+            videoPlayer.addEventListener('loadedmetadata', onMeta);
+        }
         videoPlayer.play().catch(() => {});
         return;
     }
@@ -1290,6 +1296,11 @@ window.openPlayer = async function(encodedRelPath) {
         playerTitle.textContent = video.name;
     }
     if (downloadLink) downloadLink.href = video.url;
+    // Activate modal BEFORE attaching media & calling play() so <video> is visible
+    // in the render tree during the user gesture (required by iOS Safari).
+    playerModal.classList.add('active');
+    applySubtitleStyle();
+
     const isMkv = (video.ext || '').toLowerCase() === 'mkv';
     const startWithHls = isMkv && browserNeedsMkvRemux();
     if (startWithHls) {
@@ -1314,9 +1325,6 @@ window.openPlayer = async function(encodedRelPath) {
     }
     
     renderSubtitleDropdown(currentAvailableTracks, '내장 자막 확인 중...');
-    
-    playerModal.classList.add('active');
-    applySubtitleStyle();
     
     if (!isMinimized && window.innerWidth <= 640 && modalDialog) {
         modalDialog.style.width = '';
@@ -2384,9 +2392,11 @@ if (videoPlayer) {
     videoPlayer.addEventListener('ratechange', updateMediaSessionPosition);
     videoPlayer.addEventListener('loadedmetadata', updateMediaSessionPosition);
     
-    // Toggle play/pause by clicking directly on video element
+    // Toggle play/pause by clicking directly on video element (desktop only;
+    // on iOS/touch devices native <video controls> already handles taps).
     videoPlayer.addEventListener('click', (e) => {
         if (e.target !== videoPlayer) return;
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) return;
         if (videoPlayer.paused) {
             videoPlayer.play().catch(() => {});
         } else {

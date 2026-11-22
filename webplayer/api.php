@@ -371,7 +371,7 @@ function getHlsInfo($fullVideoPath) {
     $tmpDir = '/tmp/webplayer_sub_ram';
     if (is_link($tmpDir)) @unlink($tmpDir);
     if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
-    $cacheFile = $tmpDir . '/hls_v2_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath)) . '.json';
+    $cacheFile = $tmpDir . '/hls_v3_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath)) . '.json';
     if (file_exists($cacheFile) && filesize($cacheFile) > 0) {
         $cached = @json_decode(@file_get_contents($cacheFile), true);
         if (is_array($cached) && !empty($cached['success'])) {
@@ -430,14 +430,24 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
     $dur = max(1.0, (float)$info['duration']);
     $fsize = (float)getSafeFileSize($fullVideoPath);
     $bw = ($fsize > 0) ? (int)max(1000000, min(20000000, ($fsize * 8.0) / $dur)) : 8000000;
-    $hasAudio = (isset($info['audio_stream']) && $info['audio_stream'] !== null);
-    $codecs = $hasAudio ? 'avc1.640028,mp4a.40.2' : 'avc1.640028';
+    $vCodecRfc = !empty($info['video_codec_rfc']) ? $info['video_codec_rfc'] : 'avc1.640028';
+    $aCodec = isset($info['audio_codec']) ? strtolower($info['audio_codec']) : '';
+    $aCodecRfc = !empty($info['audio_codec_rfc']) ? $info['audio_codec_rfc'] : '';
+    $hasSupportedAudio = (isset($info['audio_stream']) && $info['audio_stream'] !== null && in_array($aCodec, array('aac', 'mp3', 'ac3', 'eac3')));
+    if ($hasSupportedAudio && empty($aCodecRfc)) {
+        $aCodecRfc = 'mp4a.40.2';
+    }
+    $codecs = $hasSupportedAudio ? ($vCodecRfc . ',' . $aCodecRfc) : $vCodecRfc;
+    $resAttr = '';
+    if (!empty($info['width']) && !empty($info['height'])) {
+        $resAttr = ',RESOLUTION=' . intval($info['width']) . 'x' . intval($info['height']);
+    }
     $encodedVideo = rawurlencode($videoRel);
 
     $body = "#EXTM3U\n"
         . "#EXT-X-VERSION:3\n"
         . "#EXT-X-INDEPENDENT-SEGMENTS\n"
-        . "#EXT-X-STREAM-INF:BANDWIDTH=" . $bw . ",CODECS=\"" . $codecs . "\"\n"
+        . "#EXT-X-STREAM-INF:BANDWIDTH=" . $bw . ",CODECS=\"" . $codecs . "\"" . $resAttr . "\n"
         . "api.php?action=hls_manifest&video=" . $encodedVideo . "&ext=.m3u8\n";
 
     if (function_exists('apache_setenv')) @apache_setenv('no-gzip', '1');
@@ -542,55 +552,79 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_seg') {
     }
 
     $seg = $info['segments'][$segIdx];
+    $isLastSeg = ($segIdx >= count($info['segments']) - 1);
     $startSec = (float)$seg['start'];
+    $durSec = (float)$seg['dur'];
     $startSecStr = sprintf('%.3f', max(0.0, $startSec));
-    $durSecStr = sprintf('%.3f', max(0.2, (float)$seg['dur']));
+    // Trim 10ms off non-final segment duration so avconv -t stops cleanly before
+    // the next segment's IDR keyframe (prevents duplicate boundary frames on 24/30/60fps MKVs).
+    $cutDurSec = max(0.2, $durSec - 0.010);
+    $durArg = $isLastSeg ? '' : (' -t ' . sprintf('%.3f', $cutDurSec));
     $vStream = isset($info['video_stream']) ? intval($info['video_stream']) : 0;
-    $aStream = (isset($info['audio_stream']) && $info['audio_stream'] !== null) ? intval($info['audio_stream']) : -1;
+    $aCodec = isset($info['audio_codec']) ? strtolower($info['audio_codec']) : '';
+    $aStream = (isset($info['audio_stream']) && $info['audio_stream'] !== null && in_array($aCodec, array('aac', 'mp3', 'ac3', 'eac3')))
+        ? intval($info['audio_stream'])
+        : -1;
     $vCodec = isset($info['video_codec']) ? strtolower($info['video_codec']) : '';
 
     $tmpDir = '/tmp/webplayer_sub_ram';
     if (is_link($tmpDir)) @unlink($tmpDir);
     if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
 
-    $segCacheFile = $tmpDir . '/hseg_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath)) . '_' . $segIdx . '.ts';
+    $segCacheFile = $tmpDir . '/hseg_v3_' . md5($fullVideoPath . ':' . @filemtime($fullVideoPath)) . '_' . $segIdx . '.ts';
     if (!file_exists($segCacheFile) || filesize($segCacheFile) === 0) {
-        $tmpSegFile = $segCacheFile . '.' . getmypid() . '.tmp';
-        $mapArgs = '-map 0:' . $vStream;
-        if ($aStream >= 0) {
-            $mapArgs .= ' -map 0:' . $aStream;
+        $lockFile = $tmpDir . '/hseg_remux.lock';
+        $lockFp = @fopen($lockFile, 'cb');
+        if ($lockFp) {
+            @flock($lockFp, LOCK_EX);
         }
-        $bsfArg = ($vCodec === 'h264') ? ' -bsf:v h264_mp4toannexb' : '';
-        $cmd = 'export LANG=C.UTF-8 LC_ALL=C.UTF-8 LD_LIBRARY_PATH=/usr/local/wdmcserver/lib && timeout 15 /usr/local/wdmcserver/bin/avconv -y -ss '
-            . $startSecStr
-            . ' -i ' . safeShellArg($fullVideoPath)
-            . ' -t ' . $durSecStr
-            . ' ' . $mapArgs
-            . ' -c:v copy -c:a copy' . $bsfArg
-            . ' -f mpegts ' . safeShellArg($tmpSegFile) . ' 2>/dev/null';
-        $outLines = array();
-        $ret = 0;
-        @exec($cmd, $outLines, $ret);
-        if ($ret !== 0 || !file_exists($tmpSegFile) || filesize($tmpSegFile) === 0) {
-            @unlink($tmpSegFile);
-            header('HTTP/1.1 500 Internal Server Error');
-            echo "Remux failed";
-            exit;
-        }
-        // Shift PCR/PTS/DTS by +startSec so all segments form one continuous timeline (zero discontinuities!)
-        if ($startSec > 0.001) {
-            $shiftCmd = 'timeout 5 python /shares/webplayer/stream_sub.py ts_shift ' . safeShellArg($tmpSegFile) . ' ' . $startSecStr . ' 2>/dev/null';
-            @exec($shiftCmd, $sOut, $sRet);
-        }
-        @rename($tmpSegFile, $segCacheFile);
-
-        // Strict RAM cap: keep only the 3 most recent ~3MB segments (~9MB max in tmpfs)
-        $segFiles = @glob($tmpDir . '/hseg_*.ts');
-        if ($segFiles && count($segFiles) > 3) {
-            usort($segFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
-            while (count($segFiles) > 3) {
-                @unlink(array_shift($segFiles));
+        // Re-check cache after acquiring lock (avoids duplicate avconv on concurrent iOS probes)
+        if (!file_exists($segCacheFile) || filesize($segCacheFile) === 0) {
+            $tmpSegFile = $segCacheFile . '.' . getmypid() . '.tmp';
+            $mapArgs = '-map 0:' . $vStream;
+            if ($aStream >= 0) {
+                $mapArgs .= ' -map 0:' . $aStream;
             }
+            $bsfArg = ($vCodec === 'h264') ? ' -bsf:v h264_mp4toannexb' : '';
+            $cmd = 'export LANG=C.UTF-8 LC_ALL=C.UTF-8 LD_LIBRARY_PATH=/usr/local/wdmcserver/lib && timeout 15 /usr/local/wdmcserver/bin/avconv -y -probesize 65536 -analyzeduration 0 -ss '
+                . $startSecStr
+                . ' -i ' . safeShellArg($fullVideoPath)
+                . $durArg
+                . ' ' . $mapArgs
+                . ' -c:v copy -c:a copy' . $bsfArg
+                . ' -f mpegts ' . safeShellArg($tmpSegFile) . ' 2>/dev/null';
+            $outLines = array();
+            $ret = 0;
+            @exec($cmd, $outLines, $ret);
+            if ($ret !== 0 || !file_exists($tmpSegFile) || filesize($tmpSegFile) === 0) {
+                @unlink($tmpSegFile);
+                if ($lockFp) {
+                    @flock($lockFp, LOCK_UN);
+                    @fclose($lockFp);
+                }
+                header('HTTP/1.1 500 Internal Server Error');
+                echo "Remux failed";
+                exit;
+            }
+            // Shift PCR/PTS/DTS by +startSec so all segments form one continuous timeline (zero discontinuities!)
+            if ($startSec > 0.001) {
+                $shiftCmd = 'timeout 5 python /shares/webplayer/stream_sub.py ts_shift ' . safeShellArg($tmpSegFile) . ' ' . $startSecStr . ' 2>/dev/null';
+                @exec($shiftCmd, $sOut, $sRet);
+            }
+            @rename($tmpSegFile, $segCacheFile);
+
+            // Strict RAM cap: keep only the 4 most recent segments (~8-12MB max in tmpfs)
+            $segFiles = @glob($tmpDir . '/hseg_*.ts');
+            if ($segFiles && count($segFiles) > 4) {
+                usort($segFiles, function($a, $b) { return filemtime($a) - filemtime($b); });
+                while (count($segFiles) > 4) {
+                    @unlink(array_shift($segFiles));
+                }
+            }
+        }
+        if ($lockFp) {
+            @flock($lockFp, LOCK_UN);
+            @fclose($lockFp);
         }
     }
 

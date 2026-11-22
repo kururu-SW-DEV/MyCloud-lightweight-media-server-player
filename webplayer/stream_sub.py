@@ -778,9 +778,14 @@ def probe_hls_info(video_path):
         tracks_data = f.read(min(tsz, 262144))
 
         video_stream = None
+        video_track_num = None
         video_codec = ''
+        video_codec_rfc = ''
+        video_width = 0
+        video_height = 0
         audio_stream = None
         audio_codec = ''
+        audio_codec_rfc = ''
         cur_stream = 0
         p = 0
         while p < len(tracks_data):
@@ -791,15 +796,23 @@ def probe_hls_info(video_path):
             entry_end = p + el + esl + esz
             if eid == 0xAE:
                 ep = p + el + esl
+                tnum = None
                 ttype = None
                 tcodec = ''
+                cpriv = None
+                vw = 0
+                vh = 0
                 while ep < entry_end:
                     ieid, iel = read_id(tracks_data, ep)
                     if ieid is None: break
                     isz, isl = read_vint(tracks_data, ep + iel)
                     if isz is None: break
                     vpos = ep + iel + isl
-                    if ieid == 0x83 and isz >= 1:
+                    if ieid == 0xD7 and isz <= 8:
+                        v = 0
+                        for i in range(isz): v = (v << 8) | ord(tracks_data[vpos + i])
+                        tnum = v
+                    elif ieid == 0x83 and isz >= 1:
                         ttype = ord(tracks_data[vpos])
                     elif ieid == 0x86:
                         raw_c = tracks_data[vpos : vpos + isz]
@@ -807,25 +820,75 @@ def probe_hls_info(video_path):
                             tcodec = raw_c.decode('utf-8', 'ignore')
                         except Exception:
                             tcodec = str(raw_c)
+                    elif ieid == 0x63A2 and isz > 0:
+                        cpriv = tracks_data[vpos : vpos + min(isz, 64)]
+                    elif ieid == 0xE0 and isz > 0:
+                        vp = vpos
+                        vend = vpos + isz
+                        while vp < vend:
+                            veid, vel = read_id(tracks_data, vp)
+                            if veid is None: break
+                            vesz, vesl = read_vint(tracks_data, vp + vel)
+                            if vesz is None: break
+                            vv = vp + vel + vesl
+                            if veid == 0xB0 and vesz <= 8:
+                                v = 0
+                                for i in range(vesz): v = (v << 8) | ord(tracks_data[vv + i])
+                                vw = v
+                            elif veid == 0xBA and vesz <= 8:
+                                v = 0
+                                for i in range(vesz): v = (v << 8) | ord(tracks_data[vv + i])
+                                vh = v
+                            vp = vv + vesz
                     ep = vpos + isz
                 if ttype == 1 and video_stream is None:
                     video_stream = cur_stream
+                    video_track_num = tnum
+                    video_width = vw
+                    video_height = vh
                     cu = tcodec.upper()
-                    if 'AVC' in cu or 'H264' in cu: video_codec = 'h264'
-                    elif 'HEVC' in cu or 'H265' in cu: video_codec = 'hevc'
-                    elif 'VP9' in cu: video_codec = 'vp9'
-                    elif 'VP8' in cu: video_codec = 'vp8'
-                    else: video_codec = cu
+                    if 'AVC' in cu or 'H264' in cu:
+                        video_codec = 'h264'
+                        if cpriv and len(cpriv) >= 4:
+                            video_codec_rfc = 'avc1.%02x%02x%02x' % (ord(cpriv[1]), ord(cpriv[2]), ord(cpriv[3]))
+                        else:
+                            video_codec_rfc = 'avc1.640028'
+                    elif 'HEVC' in cu or 'H265' in cu:
+                        video_codec = 'hevc'
+                    elif 'VP9' in cu:
+                        video_codec = 'vp9'
+                    elif 'VP8' in cu:
+                        video_codec = 'vp8'
+                    else:
+                        video_codec = cu
                 elif ttype == 2 and audio_stream is None:
                     audio_stream = cur_stream
                     cu = tcodec.upper()
-                    if 'AAC' in cu: audio_codec = 'aac'
-                    elif 'MPEG/L3' in cu or 'MP3' in cu: audio_codec = 'mp3'
-                    elif 'AC3' in cu or 'EAC3' in cu: audio_codec = 'ac3'
-                    elif 'DTS' in cu: audio_codec = 'dts'
-                    elif 'FLAC' in cu: audio_codec = 'flac'
-                    elif 'OPUS' in cu: audio_codec = 'opus'
-                    else: audio_codec = cu
+                    if 'AAC' in cu:
+                        audio_codec = 'aac'
+                        aot = 2
+                        if cpriv and len(cpriv) >= 1:
+                            parsed_aot = (ord(cpriv[0]) >> 3) & 0x1F
+                            if parsed_aot in (1, 2, 5, 29):
+                                aot = parsed_aot
+                        audio_codec_rfc = 'mp4a.40.%d' % aot
+                    elif 'MPEG/L3' in cu or 'MP3' in cu:
+                        audio_codec = 'mp3'
+                        audio_codec_rfc = 'mp4a.40.34'
+                    elif 'EAC3' in cu:
+                        audio_codec = 'eac3'
+                        audio_codec_rfc = 'ec-3'
+                    elif 'AC3' in cu:
+                        audio_codec = 'ac3'
+                        audio_codec_rfc = 'ac-3'
+                    elif 'DTS' in cu:
+                        audio_codec = 'dts'
+                    elif 'FLAC' in cu:
+                        audio_codec = 'flac'
+                    elif 'OPUS' in cu:
+                        audio_codec = 'opus'
+                    else:
+                        audio_codec = cu
                 cur_stream += 1
             p = entry_end
 
@@ -834,8 +897,11 @@ def probe_hls_info(video_path):
             print(json.dumps({"success": False, "error": "No video stream found"}))
             return
 
-        # 3. Read Cues (0x1C53BB6B) to collect exact keyframe timestamps
+        # 3. Read Cues (0x1C53BB6B) and collect ONLY video-track keyframe timestamps!
+        # Filtering by CueTrack (0xF7) == video_track_num is critical: MKVs with embedded
+        # ASS/SRT subtitles store subtitle cue points in Cues that are NOT video keyframes.
         kf_times = []
+        all_cue_times = []
         if cues_offset is not None:
             f.seek(seg_data_start + cues_offset)
             cid_b = f.read(12)
@@ -847,7 +913,8 @@ def probe_hls_info(video_path):
                 cp = 0
                 clen = len(cues_data)
                 scale_sec = timecode_scale / 1000000000.0
-                last_t = -1.0
+                last_vt = -1.0
+                last_at = -1.0
                 while cp < clen:
                     ceid, cel = read_id(cues_data, cp)
                     if ceid is None: break
@@ -856,6 +923,9 @@ def probe_hls_info(video_path):
                     cend = cp + cel + cesl + cesz
                     if ceid == 0xBB:
                         ip = cp + cel + cesl
+                        c_time = None
+                        has_video_track = False
+                        saw_any_track = False
                         while ip < cend:
                             ieid, iel = read_id(cues_data, ip)
                             if ieid is None: break
@@ -865,25 +935,50 @@ def probe_hls_info(video_path):
                             if ieid == 0xB3 and iesz <= 8:
                                 v = 0
                                 for i in range(iesz): v = (v << 8) | ord(cues_data[ivpos + i])
-                                t_sec = v * scale_sec
-                                if t_sec > last_t + 0.001:
-                                    kf_times.append(t_sec)
-                                    last_t = t_sec
-                                break
+                                c_time = v * scale_sec
+                            elif ieid == 0xB7:
+                                tp = ivpos
+                                tend = ivpos + iesz
+                                while tp < tend:
+                                    teid, tel = read_id(cues_data, tp)
+                                    if teid is None: break
+                                    tesz, tesl = read_vint(cues_data, tp + tel)
+                                    if tesz is None: break
+                                    tvpos = tp + tel + tesl
+                                    if teid == 0xF7 and tesz <= 8:
+                                        v = 0
+                                        for i in range(tesz): v = (v << 8) | ord(cues_data[tvpos + i])
+                                        saw_any_track = True
+                                        if video_track_num is None or v == video_track_num:
+                                            has_video_track = True
+                                    tp = tvpos + tesz
                             ip = ivpos + iesz
+                        if c_time is not None:
+                            if c_time > last_at + 0.001:
+                                all_cue_times.append(c_time)
+                                last_at = c_time
+                            if (has_video_track or not saw_any_track) and c_time > last_vt + 0.001:
+                                kf_times.append(c_time)
+                                last_vt = c_time
                     cp = cend
         f.close()
+
+        if len(kf_times) < 2 and len(all_cue_times) >= 2:
+            kf_times = all_cue_times
 
         if duration_sec <= 0 and kf_times:
             duration_sec = kf_times[-1] + 5.0
 
-        # 4. Group keyframes into ~4s HLS segments (fast startup on mobile/LTE + low RAM buffer)
+        # 4. Group exact video keyframes into HLS segments:
+        # First 2 segments target ~2s for rapid mobile/LTE startup; subsequent segments target ~4s
+        # to keep NAS CPU and playlist overhead low.
         segments = []
         target_dur = 4.0
         if len(kf_times) >= 2:
             seg_start = 0.0
             for t in kf_times:
-                if t - seg_start >= 3.5:
+                min_gap = 1.8 if len(segments) < 2 else 3.5
+                if t - seg_start >= min_gap:
                     dur = round(t - seg_start, 3)
                     if dur > 0.1:
                         segments.append({"start": round(seg_start, 3), "dur": dur})
@@ -905,8 +1000,12 @@ def probe_hls_info(video_path):
             "duration": round(duration_sec, 3),
             "video_stream": video_stream,
             "video_codec": video_codec,
+            "video_codec_rfc": video_codec_rfc,
+            "width": video_width,
+            "height": video_height,
             "audio_stream": audio_stream,
             "audio_codec": audio_codec,
+            "audio_codec_rfc": audio_codec_rfc,
             "remuxable": remuxable,
             "segments": segments
         }))

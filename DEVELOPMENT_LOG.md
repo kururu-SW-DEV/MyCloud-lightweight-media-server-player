@@ -300,3 +300,19 @@
    - iOS Safari / macOS Safari / Firefox 등 MKV 미지원 브라우저에서는 자동으로 실시간 HLS 리먹싱 모드로 재생(Safari는 네이티브 HLS, 비-Safari는 로컬 `hls.light.min.js` 지연 로드로 LAN 오프라인 완전 지원).
    - Chrome/Edge에서는 0-CPU 원본 직접 재생을 우선 시도하되, 재생 오류(`error`) 발생 시 실시간 HLS 리먹싱으로 자동 폴백.
    - 플레이어 상단에 MKV 전용 **HLS** 수동 전환 버튼(`#btn-hls-remux`)을 추가하여 재생 위치(`currentTime`)를 유지한 채 원본/HLS 모드 간 즉시 전환 가능.
+
+### Phase 22: iOS Safari(AVPlayer) HLS 재생 호환성 완전 해결 및 고속화 (2026-11-23)
+1. **MKV `Cues` 비디오 트랙(`CueTrack`) 필터링으로 PTS 역전/중복 버그 근본 해결 (`stream_sub.py`)**:
+   - 내장 ASS/SRT 자막이 포함된 MKV(예: `신의 물방울` 등)의 `Cues` 블록에 자막 트랙(Track 3)의 큐 포인트가 비디오 키프레임과 혼재되어 있어, `probe_hls_info()`가 비-키프레임 시점(`7.820s`, `11.690s` 등)을 세그먼트 시작점으로 잡던 치명적 원인 규명 및 수정.
+   - `CueTrackPositions`(`0xB7`) 내부의 `CueTrack`(`0xF7`)을 비디오 트랙 번호(`video_track_num`)와 정확히 대조하여 순수 비디오 IDR 키프레임만 추출하도록 수정.
+   - `Tracks`의 `CodecPrivate`(`avcC`, AAC `AudioSpecificConfig`) 및 `PixelWidth`/`PixelHeight`를 0ms 비용으로 직접 파싱하여 Master Playlist에 파일별 정확한 `CODECS`(`avc1.XXXXXX,mp4a.40.X`) 및 `RESOLUTION` 제공.
+   - 초반 2개 세그먼트는 ~2초(`~1.3~1.9MB`) 고속 스타트업으로 구성하고 이후 세그먼트는 ~4초로 전환하는 하이브리드 분할 적용.
+2. **연속 타임라인 MPEG-TS 리먹싱·경계 프레임 중복 방지·동시성 직렬화 및 3배 가속 (`stream_sub.py`, `api.php`)**:
+   - `ts_shift` 서브커맨드로 세그먼트 내 33-bit PCR/PTS/DTS를 `+startSec * 90000`만큼 고속 시프트하여 `#EXT-X-DISCONTINUITY` 없는 연속 타임라인 구현(모든 세그먼트 경계 오차 정확히 1프레임 `+0.0420s`).
+   - `hls_master` Apple Master Playlist, 정확한 `Content-Length`, `Accept-Ranges: bytes`, HTTP 206 Byte-Range 응답, RAM tmpfs 캐시(`hseg_v3_*`, 최대 4세그먼트 상한) 구현.
+   - 비-말단 세그먼트에 `-t (dur - 0.010)`을 적용하여 24/30/60fps MKV에서 다음 세그먼트 IDR 키프레임이 중복 포함되는 현상 차단.
+   - `avconv`에 `-probesize 65536 -analyzeduration 0`을 적용해 폰트 첨부가 많은 MKV의 세그먼트 리먹싱 시간을 `1.25s -> 0.42s`(3배) 단축하고, `flock` 직렬화로 iOS CoreMedia 프로브 동시 요청 시 중복 `avconv` 실행 차단.
+3. **iOS Safari `<video>` 제스처·로딩·터치 컨트롤 호환성 개선 (`app.js`, `index.html`)**:
+   - `openPlayer()`에서 `playerModal.classList.add('active')`를 `attachVideoSource()`보다 먼저 실행하여 `<video>`가 렌더 트리에 표시된 상태에서 사용자 탭 제스처 내 `play()`가 호출되도록 수정.
+   - 네이티브 Safari HLS 경로에서 불필요한 `videoPlayer.load()` 선행 호출 및 중복 `loadedmetadata` 리스너 누수를 제거하여 세그먼트 0 조기 중단/재요청 방지.
+   - 터치 기기에서 네이티브 `<video controls>` 재생 탭과 충돌하던 `videoPlayer` `click` 토글 핸들러를 데스크톱 전용으로 분기하고 `webkit-playsinline` 속성 추가.
