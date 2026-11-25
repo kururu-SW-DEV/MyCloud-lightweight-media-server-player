@@ -392,13 +392,83 @@ function exitFullscreenSafe() {
     }
 }
 
-// Fullscreen toggle on videoPlayer
+let isIosPseudoFullscreen = false;
+let pseudoFsHideTimer = null;
+
+function revealPseudoFsExitBtn() {
+    const exitBtn = document.getElementById('btn-exit-pseudo-fs');
+    if (!exitBtn || !isIosPseudoFullscreen) return;
+    exitBtn.classList.add('visible');
+    if (pseudoFsHideTimer) clearTimeout(pseudoFsHideTimer);
+    pseudoFsHideTimer = setTimeout(() => {
+        if (isIosPseudoFullscreen) exitBtn.classList.remove('visible');
+    }, 2500);
+}
+
+function setIosPseudoFullscreen(enable) {
+    if (!playerModal) return;
+    isIosPseudoFullscreen = !!enable;
+    playerModal.classList.toggle('ios-pseudo-fs', isIosPseudoFullscreen);
+    document.documentElement.classList.toggle('is-fullscreen', isIosPseudoFullscreen);
+    const exitBtn = document.getElementById('btn-exit-pseudo-fs');
+    if (pseudoFsHideTimer) {
+        clearTimeout(pseudoFsHideTimer);
+        pseudoFsHideTimer = null;
+    }
+    if (exitBtn) {
+        exitBtn.style.display = isIosPseudoFullscreen ? 'inline-flex' : 'none';
+        exitBtn.classList.remove('visible');
+        if (isIosPseudoFullscreen) {
+            requestAnimationFrame(() => revealPseudoFsExitBtn());
+        }
+    }
+    if (fullscreenBtn) {
+        fullscreenBtn.innerHTML = isIosPseudoFullscreen
+            ? `${PLAYER_SVG.exitFullscreen} <span>창모드</span>`
+            : `${PLAYER_SVG.fullscreen} <span>전체화면</span>`;
+    }
+    if (typeof resizeJassubIfActive === 'function') resizeJassubIfActive();
+}
+
+const btnExitPseudoFs = document.getElementById('btn-exit-pseudo-fs');
+if (btnExitPseudoFs) {
+    btnExitPseudoFs.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setIosPseudoFullscreen(false);
+    });
+}
+if (videoWrapper) {
+    videoWrapper.addEventListener('touchstart', () => {
+        if (isIosPseudoFullscreen) revealPseudoFsExitBtn();
+    }, { passive: true });
+    videoWrapper.addEventListener('click', () => {
+        if (isIosPseudoFullscreen) revealPseudoFsExitBtn();
+    });
+}
+window.addEventListener('orientationchange', () => {
+    if (typeof resizeJassubIfActive === 'function') resizeJassubIfActive();
+});
+
+// Fullscreen toggle:
+// - Desktop/Android with JASSUB ASS active -> fullscreen videoWrapper so libass canvas stays visible in fullscreen.
+// - iOS with JASSUB ASS active -> CSS Web Fullscreen (ios-pseudo-fs) so libass ASS canvas renders in fullscreen!
+// - iOS without JASSUB -> native AVPlayerViewController fullscreen.
 function toggleFullscreen() {
+    if (isIosPseudoFullscreen) {
+        setIosPseudoFullscreen(false);
+        return;
+    }
     if (isFullscreen()) {
         exitFullscreenSafe();
     } else {
         if (isMinimized) restoreFromMinimize();
-        enterFullscreenSafe(videoPlayer);
+        const assOn = (typeof isJassubActive !== 'undefined' && isJassubActive);
+        if (assOn && isIOSDevice() && videoWrapper) {
+            setIosPseudoFullscreen(true);
+            return;
+        }
+        const useWrapperFs = (assOn && !isIOSDevice() && videoWrapper);
+        enterFullscreenSafe(useWrapperFs ? videoWrapper : videoPlayer);
     }
 }
 
@@ -442,6 +512,7 @@ function enterMinimize() {
     const top = Math.max(margin, window.innerHeight - mh - (window.innerWidth <= 640 ? margin : 16));
     modalDialog.style.left = `${left}px`;
     modalDialog.style.top = `${top}px`;
+    if (typeof resizeJassubIfActive === 'function') resizeJassubIfActive();
 }
 
 function restoreFromMinimize() {
@@ -564,10 +635,16 @@ function getWebPlayerTrack() {
 
 function useIOSNativeCaptions() {
     if (!isIOSDevice()) return false;
+    // When JASSUB (libass WASM) is actively rendering ASS inline on iOS,
+    // suppress native captions inline (avoid double subtitles) and only hand off
+    // to native WebVTT when entering AVPlayerViewController fullscreen.
+    if (typeof isJassubActive !== 'undefined' && isJassubActive && !isFullscreen()) {
+        return false;
+    }
     const isLocalCustom = activeSubtitleTrackInfo && activeSubtitleTrackInfo.type === 'external' && !activeSubtitleTrackInfo.subRel;
     if (isLocalCustom) return false;
     if (isHlsRemuxActive) {
-        return getNativeHlsSubtitleTracks().length > 0 && subtitleOffset === 0;
+        return subtitleOffset === 0;
     }
     return !!(activeSubtitleTrackInfo && activeSubtitleTrackInfo.type === 'external' && activeSubtitleTrackInfo.subRel);
 }
@@ -578,14 +655,18 @@ function syncNativeFullscreenTracks(forceFullscreen = false) {
     const wpTrack = getWebPlayerTrack();
     const hlsTracks = getNativeHlsSubtitleTracks();
     const iosNativeMode = useIOSNativeCaptions();
-    const wantShowNative = isFs || iosNativeMode;
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement || null;
+    const jassubCoversFs = (typeof isJassubActive !== 'undefined' && isJassubActive && !isIOSDevice() && (!isFs || fsEl === videoWrapper));
+    const wantShowNative = (!jassubCoversFs && isFs) || iosNativeMode;
 
     if (!wantShowNative) {
-        // Desktop/Android windowed mode: suppress ALL native browser captions so our
-        // custom DOM subtitle overlay renders cleanly with zero double subtitles.
+        // Suppress visible native captions so JASSUB/DOM overlay renders with zero double subtitles.
+        // On iOS with JASSUB active inline, keep the primary HLS track in 'hidden' (not 'disabled')
+        // so Apple AVPlayer still pre-fetches WebVTT if the user taps native iOS fullscreen!
         if (wpTrack) wpTrack.mode = 'hidden';
+        const prewarmIosHls = isIOSDevice() && typeof isJassubActive !== 'undefined' && isJassubActive && !isFs;
         for (let i = 0; i < hlsTracks.length; i++) {
-            hlsTracks[i].mode = 'disabled';
+            hlsTracks[i].mode = (prewarmIosHls && i === 0) ? 'hidden' : 'disabled';
         }
         return;
     }
@@ -690,6 +771,12 @@ function syncCuesToTextTrack() {
 function handleFullscreenSubtitleSync() {
     const isFs = isFullscreen();
     syncNativeFullscreenTracks(isFs);
+    if (typeof isJassubActive !== 'undefined' && isJassubActive && isIOSDevice()) {
+        setJassubCanvasVisible(!isFs);
+        if (!isFs && typeof resizeJassubIfActive === 'function') {
+            resizeJassubIfActive();
+        }
+    }
     if (isFs || useIOSNativeCaptions()) {
         if (subtitleBox) subtitleBox.style.display = "none";
     } else {
@@ -715,6 +802,9 @@ function handleFullscreenChange() {
     }
 
     handleFullscreenSubtitleSync();
+    if (typeof resizeJassubIfActive === 'function') {
+        resizeJassubIfActive();
+    }
 }
 
 document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -724,6 +814,7 @@ if (videoPlayer) {
     // iPhone Safari fires webkitbeginfullscreen / webkitendfullscreen on <video>
     // instead of document fullscreenchange!
     videoPlayer.addEventListener('webkitbeginfullscreen', () => {
+        if (typeof setJassubCanvasVisible === 'function') setJassubCanvasVisible(false);
         handleFullscreenChange();
         // Re-assert native subtitle track after AVPlayerViewController finishes opening
         setTimeout(() => {
@@ -731,6 +822,7 @@ if (videoPlayer) {
         }, 180);
     });
     videoPlayer.addEventListener('webkitendfullscreen', () => {
+        if (typeof setJassubCanvasVisible === 'function') setJassubCanvasVisible(true);
         handleFullscreenChange();
         setTimeout(() => {
             if (!isFullscreen()) handleFullscreenSubtitleSync();
@@ -748,6 +840,13 @@ let lastDisplayedPosTop = null;
 
 function updateSubtitleDisplay() {
     if (!subtitleBox) return;
+
+    // When JASSUB (libass WASM) is actively rendering ASS subtitles on canvas,
+    // hide the DOM overlay to avoid duplicate subtitles.
+    if (typeof isJassubActive !== 'undefined' && isJassubActive) {
+        if (subtitleBox.style.display !== 'none') subtitleBox.style.display = 'none';
+        return;
+    }
 
     // In fullscreen (or on iOS where native WebVTT captions stay active so
     // AVPlayerViewController preserves them on fullscreen entry), hide the DOM
@@ -1607,11 +1706,18 @@ async function loadSelectedTrack(track) {
     const requestedVideo = activeVideo;
 
     const cacheKey = `${track.relPath || track.url}:${track.streamId !== undefined ? track.streamId : ''}`;
+    const isAssCachedTrack = (track.codec && track.codec.toLowerCase() === 'ass') ||
+        (track.ext && (track.ext.toLowerCase() === 'ass' || track.ext.toLowerCase() === 'ssa'));
     if (subtitleMemoryCache.has(cacheKey)) {
         const cached = subtitleMemoryCache.get(cacheKey);
         if (activeVideo !== requestedVideo) return;
         parsedSubtitles = cached;
         syncCuesToTextTrack();
+        if (isAssCachedTrack && typeof rawAssMemoryCache !== 'undefined' && rawAssMemoryCache.has(cacheKey)) {
+            await activateAssRendererIfEnabled(rawAssMemoryCache.get(cacheKey));
+        } else if (typeof destroyJassubRenderer === 'function') {
+            destroyJassubRenderer();
+        }
         updateSubtitleDisplay();
         showToast(`자막 즉시 로드 완료 (${parsedSubtitles.length}개 자막)`);
         return;
@@ -1644,9 +1750,15 @@ async function loadSelectedTrack(track) {
             const buffer = await resp.arrayBuffer();
             if (activeVideo !== requestedVideo) return;
             const text = decodeSubtitleBuffer(buffer);
-            if (isAss) parsedSubtitles = parseASS(text);
-            else if (isSami) parsedSubtitles = parseSAMI(text);
-            else parsedSubtitles = parseSRT(text);
+            if (isAss) {
+                parsedSubtitles = parseASS(text);
+                if (typeof cacheRawAssText === 'function') cacheRawAssText(cacheKey, text);
+                await activateAssRendererIfEnabled(text);
+            } else {
+                if (typeof destroyJassubRenderer === 'function') destroyJassubRenderer();
+                if (isSami) parsedSubtitles = parseSAMI(text);
+                else parsedSubtitles = parseSRT(text);
+            }
 
             if (parsedSubtitles.length > 0) {
                 subtitleMemoryCache.set(cacheKey, parsedSubtitles);
@@ -1700,8 +1812,14 @@ async function loadSelectedTrack(track) {
         
         if (activeVideo !== requestedVideo) return;
         rawBuffer += decoder.decode();
-        if (isAss) parsedSubtitles = parseASS(rawBuffer);
-        else parsedSubtitles = parseSRT(rawBuffer);
+        if (isAss) {
+            parsedSubtitles = parseASS(rawBuffer);
+            if (typeof cacheRawAssText === 'function') cacheRawAssText(cacheKey, rawBuffer);
+            await activateAssRendererIfEnabled(rawBuffer);
+        } else {
+            if (typeof destroyJassubRenderer === 'function') destroyJassubRenderer();
+            parsedSubtitles = parseSRT(rawBuffer);
+        }
 
         if (parsedSubtitles.length > 0) {
             subtitleMemoryCache.set(cacheKey, parsedSubtitles);
@@ -1725,6 +1843,12 @@ async function loadSelectedTrack(track) {
 
 function clearSubtitles() {
     activeSubtitleTrackInfo = null;
+    if (typeof destroyJassubRenderer === 'function') {
+        destroyJassubRenderer();
+    }
+    if (typeof currentRawAssText !== 'undefined') {
+        currentRawAssText = '';
+    }
     if (currentSubAbortController) {
         try { currentSubAbortController.abort(); } catch (e) {}
         currentSubAbortController = null;
@@ -2097,6 +2221,7 @@ document.querySelectorAll('.sync-btn').forEach(btn => {
         const offset = parseFloat(btn.dataset.offset);
         subtitleOffset += offset;
         syncDisplay.textContent = (subtitleOffset >= 0 ? '+' : '') + subtitleOffset.toFixed(1) + 's';
+        if (typeof syncJassubTimeOffset === 'function') syncJassubTimeOffset();
         syncCuesToTextTrack();
         updateSubtitleDisplay();
     });
@@ -2105,6 +2230,7 @@ document.querySelectorAll('.sync-btn').forEach(btn => {
 syncResetBtn.addEventListener('click', () => {
     subtitleOffset = 0;
     syncDisplay.textContent = '0.0s';
+    if (typeof syncJassubTimeOffset === 'function') syncJassubTimeOffset();
     syncCuesToTextTrack();
     updateSubtitleDisplay();
 });
@@ -2143,6 +2269,9 @@ if (minimizeBtn) {
 }
 
 function closePlayer() {
+    if (isIosPseudoFullscreen) {
+        setIosPseudoFullscreen(false);
+    }
     if (isFullscreen()) {
         exitFullscreenSafe();
     }
@@ -2168,6 +2297,7 @@ function closePlayer() {
     while (customSubBlobUrls.length > 0) {
         const u = customSubBlobUrls.pop();
         subtitleMemoryCache.delete(`${u}:`);
+        if (typeof rawAssMemoryCache !== 'undefined') rawAssMemoryCache.delete(`${u}:`);
         try { URL.revokeObjectURL(u); } catch (e) {}
     }
     userManuallySelectedSubtitle = false;
@@ -2558,3 +2688,453 @@ if (videoPlayer) {
         }
     });
 }
+
+// =========================================================================
+// 9. JASSUB (libass WebAssembly) ASS RENDERER & ON-DEMAND FONT FOLDER SETTINGS
+// =========================================================================
+const ASS_SETTINGS_KEY = 'mycloud_player_ass_settings_v1';
+const rawAssMemoryCache = new Map();
+let currentRawAssText = '';
+let jassubInstance = null;
+let isJassubActive = false;
+let assMountToken = 0;
+let cachedFontIndex = null;
+let cachedFontIndexKey = '';
+
+function cacheRawAssText(key, text) {
+    if (!key || !text) return;
+    if (rawAssMemoryCache.size >= 10 && !rawAssMemoryCache.has(key)) {
+        const oldest = rawAssMemoryCache.keys().next().value;
+        rawAssMemoryCache.delete(oldest);
+    }
+    rawAssMemoryCache.set(key, text);
+}
+
+function resizeJassubIfActive() {
+    if (!jassubInstance || !isJassubActive) return;
+    [120, 420].forEach(ms => {
+        setTimeout(() => {
+            if (jassubInstance && typeof jassubInstance.resize === 'function') {
+                try { jassubInstance.resize(); } catch (e) {}
+            }
+        }, ms);
+    });
+}
+
+function loadAssSettings() {
+    try {
+        const raw = localStorage.getItem(ASS_SETTINGS_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                return {
+                    assEnabled: parsed.assEnabled !== false,
+                    fallbackFont: typeof parsed.fallbackFont === 'string' ? parsed.fallbackFont : '',
+                    fontFolders: Array.isArray(parsed.fontFolders)
+                        ? parsed.fontFolders.filter(f => f && typeof f.path === 'string').map(f => ({
+                            path: f.path.replace(/^\/+|\/+$/g, ''),
+                            enabled: f.enabled !== false
+                        }))
+                        : []
+                };
+            }
+        }
+    } catch (e) {}
+    return { assEnabled: true, fallbackFont: '', fontFolders: [] };
+}
+
+let assSettings = loadAssSettings();
+
+function saveAssSettings() {
+    try {
+        localStorage.setItem(ASS_SETTINGS_KEY, JSON.stringify(assSettings));
+    } catch (e) {}
+    cachedFontIndex = null;
+    cachedFontIndexKey = '';
+}
+
+function getEnabledFontFolderPaths() {
+    return assSettings.fontFolders.filter(f => f.enabled).map(f => f.path);
+}
+
+async function fetchFontIndexForPaths(paths, useCache = true) {
+    const clean = (paths || []).map(p => String(p).replace(/^\/+|\/+$/g, ''));
+    const key = clean.join('|');
+    if (useCache && cachedFontIndex && cachedFontIndexKey === key) {
+        return cachedFontIndex;
+    }
+    if (clean.length === 0) {
+        const emptyRes = { success: true, available_fonts: {}, folder_stats: {}, fonts: [] };
+        if (useCache) {
+            cachedFontIndex = emptyRes;
+            cachedFontIndexKey = key;
+        }
+        return emptyRes;
+    }
+    try {
+        const qs = clean.map(p => `folders[]=${encodeURIComponent(p)}`).join('&');
+        const resp = await fetch(`api.php?action=font_index&${qs}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data && data.success) {
+            if (useCache) {
+                cachedFontIndex = data;
+                cachedFontIndexKey = key;
+            }
+            return data;
+        }
+    } catch (e) {
+        console.warn('Font index load error:', e);
+    }
+    return { success: false, available_fonts: {}, folder_stats: {}, fonts: [] };
+}
+
+function updateAssEngineBadge(active) {
+    const badge = document.getElementById('ass-engine-badge');
+    if (badge) {
+        badge.style.display = active ? 'inline-flex' : 'none';
+    }
+}
+
+function destroyJassubRenderer() {
+    assMountToken++;
+    if (jassubInstance) {
+        try { jassubInstance.destroy(); } catch (e) {}
+        jassubInstance = null;
+    }
+    isJassubActive = false;
+    updateAssEngineBadge(false);
+}
+
+function setJassubCanvasVisible(visible) {
+    if (!videoWrapper) return;
+    const jassEl = videoWrapper.querySelector('.JASSUB');
+    if (jassEl) {
+        jassEl.style.display = visible ? '' : 'none';
+    }
+}
+
+function syncJassubTimeOffset() {
+    if (jassubInstance) {
+        try {
+            jassubInstance.timeOffset = -subtitleOffset;
+        } catch (e) {}
+    }
+}
+
+async function activateAssRendererIfEnabled(assText) {
+    currentRawAssText = assText || '';
+    destroyJassubRenderer();
+    const myToken = ++assMountToken;
+    if (!assText || !assSettings.assEnabled || typeof JASSUB === 'undefined' || !videoPlayer) {
+        updateSubtitleDisplay();
+        return;
+    }
+
+    const toAbsUrl = (u) => {
+        try { return new URL(u, window.location.href).href; } catch (e) { return u; }
+    };
+
+    const defaultKoUrl = toAbsUrl('jassub/default-ko.ttf?v=1');
+    const enabledPaths = getEnabledFontFolderPaths();
+    const fontData = await fetchFontIndexForPaths(enabledPaths, true);
+    // Abort stale async mount if user switched videos or closed player while fetching font index
+    if (myToken !== assMountToken || !playerModal || !playerModal.classList.contains('active')) {
+        return;
+    }
+    const availableFonts = {
+        'default': defaultKoUrl,
+        'nanumgothic': defaultKoUrl,
+        '나눔고딕': defaultKoUrl
+    };
+    const rawMap = fontData.available_fonts || {};
+    Object.keys(rawMap).forEach(k => {
+        availableFonts[k] = toAbsUrl(rawMap[k]);
+    });
+
+    // Pick fallback font: user preference -> first font in enabled folders -> built-in Korean NanumGothic
+    let fallbackKey = 'nanumgothic';
+    if (assSettings.fallbackFont && availableFonts[assSettings.fallbackFont.toLowerCase()]) {
+        fallbackKey = assSettings.fallbackFont.toLowerCase();
+    } else if (fontData.fonts && fontData.fonts.length > 0) {
+        const firstKey = String(fontData.fonts[0].name || '').toLowerCase();
+        if (firstKey && availableFonts[firstKey]) {
+            fallbackKey = firstKey;
+        }
+    }
+    const fallbackUrl = availableFonts[fallbackKey] || defaultKoUrl;
+
+    try {
+        jassubInstance = new JASSUB({
+            video: videoPlayer,
+            subContent: assText,
+            workerUrl: toAbsUrl('jassub/jassub-worker.js?v=1.7.17'),
+            wasmUrl: toAbsUrl('jassub/jassub-worker.wasm?v=1.7.17'),
+            modernWasmUrl: toAbsUrl('jassub/jassub-worker-modern.wasm?v=1.7.17'),
+            fallbackFont: fallbackKey,
+            fonts: [fallbackUrl],
+            availableFonts: availableFonts,
+            timeOffset: -subtitleOffset,
+            prescaleFactor: 0.85,
+            prescaleHeightLimit: 1080,
+            libassMemoryLimit: 40,
+            libassGlyphLimit: 2000
+        });
+        isJassubActive = true;
+        updateAssEngineBadge(true);
+        if (subtitleBox) subtitleBox.style.display = 'none';
+        // Suppress any Safari/HLS native tracks that auto-enabled before JASSUB mounted
+        syncNativeFullscreenTracks(false);
+        if (isIOSDevice() && isFullscreen()) {
+            setJassubCanvasVisible(false);
+        }
+        setTimeout(() => {
+            if (jassubInstance && typeof jassubInstance.resize === 'function') {
+                try { jassubInstance.resize(); } catch (e) {}
+            }
+        }, 250);
+    } catch (err) {
+        console.error('JASSUB init failed, falling back to DOM subtitles:', err);
+        destroyJassubRenderer();
+        updateSubtitleDisplay();
+    }
+}
+
+// -------------------------------------------------------------
+// Settings Modal Controller (Clean Per-Device Font Folder UI)
+// -------------------------------------------------------------
+(function initSettingsModal() {
+    const settingsModal = document.getElementById('settings-modal');
+    const settingsBtn = document.getElementById('settings-btn');
+    const playerSettingsBtn = document.getElementById('player-settings-btn');
+    const closeSettingsBtn = document.getElementById('close-settings-btn');
+    const btnSettingsDone = document.getElementById('btn-settings-done');
+    const chkAssEnabled = document.getElementById('setting-ass-enabled');
+    const selFallbackFont = document.getElementById('setting-fallback-font');
+    const foldersListEl = document.getElementById('font-folders-list');
+    const summaryEl = document.getElementById('settings-font-summary');
+
+    const btnTogglePicker = document.getElementById('btn-toggle-font-picker');
+    const pickerBox = document.getElementById('font-folder-picker');
+    const btnPickerUp = document.getElementById('btn-picker-up');
+    const pickerPathEl = document.getElementById('font-picker-path');
+    const btnPickerAddCurrent = document.getElementById('btn-picker-add-current');
+    const pickerListEl = document.getElementById('font-picker-list');
+
+    if (!settingsModal) return;
+
+    let pickerCurrentPath = '';
+    let allStatsCache = {};
+
+    async function refreshSettingsUI() {
+        if (chkAssEnabled) chkAssEnabled.checked = !!assSettings.assEnabled;
+
+        // Fetch stats for all registered folders (so even disabled folders show font counts)
+        const allPaths = assSettings.fontFolders.map(f => f.path);
+        const allData = await fetchFontIndexForPaths(allPaths, false);
+        allStatsCache = allData.folder_stats || {};
+
+        // Compute enabled-only font list for fallback selector & summary
+        const enabledFonts = [];
+        let enabledFolderCount = 0;
+        assSettings.fontFolders.forEach(f => {
+            if (!f.enabled) return;
+            enabledFolderCount++;
+            const st = allStatsCache[f.path];
+            if (st && Array.isArray(st.fonts)) {
+                st.fonts.forEach(fn => enabledFonts.push(fn));
+            }
+        });
+
+        // Update fallback font dropdown
+        if (selFallbackFont) {
+            const curVal = assSettings.fallbackFont || '';
+            selFallbackFont.innerHTML = '<option value="">내장 기본 폰트 (자동 선택)</option>';
+            const seen = new Set();
+            enabledFonts.forEach(fn => {
+                const key = String(fn.name || '').toLowerCase();
+                if (!key || seen.has(key)) return;
+                seen.add(key);
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = `${fn.name} (${fn.size_formatted})`;
+                selFallbackFont.appendChild(opt);
+            });
+            selFallbackFont.value = seen.has(curVal.toLowerCase()) ? curVal.toLowerCase() : '';
+        }
+
+        // Update summary footer
+        if (summaryEl) {
+            summaryEl.textContent = `활성 폴더 ${enabledFolderCount}개 · 온디맨드 폰트 ${enabledFonts.length}개`;
+        }
+
+        // Render registered font folder cards
+        if (foldersListEl) {
+            foldersListEl.innerHTML = '';
+            if (assSettings.fontFolders.length === 0) {
+                foldersListEl.innerHTML = `
+                    <div class="font-folder-empty">
+                        등록된 폰트 폴더가 없습니다.<br>
+                        우측 상단 <strong>+ 폴더 추가</strong>를 눌러 NAS의 폰트 폴더(.ttf, .otf, .woff2)를 지정하세요.
+                    </div>
+                `;
+                return;
+            }
+            assSettings.fontFolders.forEach((folder, idx) => {
+                const st = allStatsCache[folder.path] || { exists: true, count: 0 };
+                const card = document.createElement('div');
+                card.className = 'font-folder-card' + (folder.enabled ? ' enabled' : '');
+
+                const displayPath = folder.path ? `Public/${folder.path}` : 'Public (루트)';
+                const subText = !st.exists
+                    ? '폴더를 찾을 수 없음'
+                    : (folder.enabled
+                        ? `폰트 ${st.count}개 · 자막 요청 시 자동 로드`
+                        : `폰트 ${st.count}개 · 이 기기에서 비활성화됨`);
+
+                card.innerHTML = `
+                    <div class="font-folder-meta">
+                        <div class="font-folder-path" title="${escapeHtml(displayPath)}">${escapeHtml(displayPath)}</div>
+                        <div class="font-folder-sub">${escapeHtml(subText)}</div>
+                    </div>
+                    <div class="font-folder-controls">
+                        <label class="ios-switch" title="이 기기에서 이 폴더의 폰트 사용 여부">
+                            <input type="checkbox" ${folder.enabled ? 'checked' : ''}>
+                            <span class="ios-switch-track"></span>
+                        </label>
+                        <button type="button" class="font-folder-remove" title="목록에서 제거">&times;</button>
+                    </div>
+                `;
+                card.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
+                    assSettings.fontFolders[idx].enabled = e.target.checked;
+                    saveAssSettings();
+                    refreshSettingsUI();
+                });
+                card.querySelector('.font-folder-remove').addEventListener('click', () => {
+                    assSettings.fontFolders.splice(idx, 1);
+                    saveAssSettings();
+                    refreshSettingsUI();
+                });
+                foldersListEl.appendChild(card);
+            });
+        }
+    }
+
+    async function loadFontPickerDir(relPath) {
+        pickerCurrentPath = relPath || '';
+        if (pickerPathEl) {
+            pickerPathEl.textContent = pickerCurrentPath ? `Public/${pickerCurrentPath}` : 'Public';
+        }
+        if (btnPickerUp) {
+            btnPickerUp.disabled = (pickerCurrentPath === '');
+        }
+        if (pickerListEl) {
+            pickerListEl.innerHTML = '<div style="padding:14px; text-align:center; font-size:0.78rem; color:var(--text-muted);">폴더 목록 읽는 중...</div>';
+        }
+        try {
+            const resp = await fetch(`api.php?action=font_dirs&parent=${encodeURIComponent(pickerCurrentPath)}`);
+            const data = await resp.json();
+            if (!data.success) throw new Error(data.error || '조회 실패');
+            if (btnPickerAddCurrent) {
+                btnPickerAddCurrent.textContent = data.current_font_count > 0
+                    ? `이 폴더 추가 (${data.current_font_count}개)`
+                    : '이 폴더 추가';
+            }
+            if (!pickerListEl) return;
+            pickerListEl.innerHTML = '';
+            if (!data.folders || data.folders.length === 0) {
+                pickerListEl.innerHTML = '<div style="padding:14px; text-align:center; font-size:0.78rem; color:var(--text-muted);">하위 폴더가 없습니다.</div>';
+                return;
+            }
+            data.folders.forEach(f => {
+                const row = document.createElement('div');
+                row.className = 'font-picker-row';
+                const pillClass = f.font_count > 0 ? 'font-count-pill' : 'font-count-pill zero';
+                const pillText = f.font_count > 0 ? `${f.font_count}개 폰트` : '폴더';
+                row.innerHTML = `
+                    <div class="font-picker-row-left">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                        <span class="font-picker-row-name">${escapeHtml(f.name)}</span>
+                    </div>
+                    <span class="${pillClass}">${pillText}</span>
+                `;
+                row.addEventListener('click', () => loadFontPickerDir(f.rel_path));
+                pickerListEl.appendChild(row);
+            });
+        } catch (e) {
+            if (pickerListEl) {
+                pickerListEl.innerHTML = '<div style="padding:14px; text-align:center; font-size:0.78rem; color:#fca5a5;">폴더 목록을 불러오지 못했습니다.</div>';
+            }
+        }
+    }
+
+    function openSettingsModal() {
+        if (pickerBox) pickerBox.style.display = 'none';
+        settingsModal.classList.add('active');
+        refreshSettingsUI();
+    }
+
+    async function closeAndApplySettings() {
+        settingsModal.classList.remove('active');
+        if (currentRawAssText && playerModal && playerModal.classList.contains('active')) {
+            await activateAssRendererIfEnabled(currentRawAssText);
+            showToast(assSettings.assEnabled ? 'ASS 렌더링 및 폰트 설정이 적용되었습니다.' : '기본 텍스트 자막 모드로 전환되었습니다.');
+        }
+    }
+
+    if (settingsBtn) settingsBtn.addEventListener('click', openSettingsModal);
+    if (playerSettingsBtn) playerSettingsBtn.addEventListener('click', openSettingsModal);
+    if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', closeAndApplySettings);
+    if (btnSettingsDone) btnSettingsDone.addEventListener('click', closeAndApplySettings);
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) closeAndApplySettings();
+    });
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && settingsModal.classList.contains('active')) {
+            e.stopImmediatePropagation();
+            closeAndApplySettings();
+        }
+    }, true);
+
+    if (chkAssEnabled) {
+        chkAssEnabled.addEventListener('change', () => {
+            assSettings.assEnabled = chkAssEnabled.checked;
+            saveAssSettings();
+        });
+    }
+    if (selFallbackFont) {
+        selFallbackFont.addEventListener('change', () => {
+            assSettings.fallbackFont = selFallbackFont.value || '';
+            saveAssSettings();
+        });
+    }
+    if (btnTogglePicker && pickerBox) {
+        btnTogglePicker.addEventListener('click', () => {
+            const willShow = pickerBox.style.display === 'none';
+            pickerBox.style.display = willShow ? 'block' : 'none';
+            if (willShow) loadFontPickerDir('');
+        });
+    }
+    if (btnPickerUp) {
+        btnPickerUp.addEventListener('click', () => {
+            if (!pickerCurrentPath) return;
+            const parts = pickerCurrentPath.split('/');
+            parts.pop();
+            loadFontPickerDir(parts.join('/'));
+        });
+    }
+    if (btnPickerAddCurrent) {
+        btnPickerAddCurrent.addEventListener('click', () => {
+            const exists = assSettings.fontFolders.some(f => f.path === pickerCurrentPath);
+            if (exists) {
+                showToast('이미 등록된 폰트 폴더입니다.');
+                return;
+            }
+            assSettings.fontFolders.push({ path: pickerCurrentPath, enabled: true });
+            saveAssSettings();
+            if (pickerBox) pickerBox.style.display = 'none';
+            refreshSettingsUI();
+            showToast(`폰트 폴더 추가됨: Public${pickerCurrentPath ? '/' + pickerCurrentPath : ''}`);
+        });
+    }
+})();

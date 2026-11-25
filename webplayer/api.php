@@ -108,6 +108,228 @@ function formatBytes($bytes, $precision = 2) {
 }
 
 // -------------------------------------------------------------
+// Action 0: Font Folder Browser & On-Demand Font Index for JASSUB (libass WASM)
+// -------------------------------------------------------------
+function extractFontFamilyNames($filePath) {
+    $names = array();
+    $base = basename($filePath);
+    $dot = strrpos($base, '.');
+    $stem = ($dot !== false) ? substr($base, 0, $dot) : $base;
+    $ext = ($dot !== false) ? strtolower(substr($base, $dot + 1)) : '';
+    if ($stem !== '') {
+        $names[] = $stem;
+    }
+    // Pure-PHP lightweight TTF/OTF/TTC 'name' table parser (reads only header + name table)
+    if (!in_array($ext, array('ttf', 'otf', 'ttc'), true)) {
+        return $names;
+    }
+    $fp = @fopen($filePath, 'rb');
+    if (!$fp) return $names;
+    $hdr = @fread($fp, 12);
+    if ($hdr === false || strlen($hdr) < 12) {
+        fclose($fp);
+        return $names;
+    }
+    $offsets = array(0);
+    if (substr($hdr, 0, 4) === 'ttcf') {
+        $numFontsArr = unpack('N', substr($hdr, 8, 4));
+        $numFonts = min(isset($numFontsArr[1]) ? (int)$numFontsArr[1] : 0, 8);
+        if ($numFonts > 0) {
+            $offBytes = @fread($fp, $numFonts * 4);
+            if ($offBytes !== false && strlen($offBytes) === $numFonts * 4) {
+                $offsets = array_values(unpack('N*', $offBytes));
+            }
+        }
+    }
+    foreach ($offsets as $fontOff) {
+        if (@fseek($fp, $fontOff, SEEK_SET) !== 0) continue;
+        $sfnt = @fread($fp, 12);
+        if ($sfnt === false || strlen($sfnt) < 12) continue;
+        $ntArr = unpack('n', substr($sfnt, 4, 2));
+        $numTables = isset($ntArr[1]) ? (int)$ntArr[1] : 0;
+        if ($numTables <= 0 || $numTables > 128) continue;
+        $dirBytes = @fread($fp, $numTables * 16);
+        if ($dirBytes === false || strlen($dirBytes) < $numTables * 16) continue;
+        $nameOffset = 0;
+        $nameLength = 0;
+        for ($i = 0; $i < $numTables; $i++) {
+            $tag = substr($dirBytes, $i * 16, 4);
+            if ($tag === 'name') {
+                $tbl = unpack('Noff/Nlen', substr($dirBytes, $i * 16 + 8, 8));
+                $nameOffset = (int)$tbl['off'];
+                $nameLength = (int)$tbl['len'];
+                break;
+            }
+        }
+        if ($nameOffset <= 0 || $nameLength < 6 || $nameLength > 262144) continue;
+        if (@fseek($fp, $nameOffset, SEEK_SET) !== 0) continue;
+        $nameData = @fread($fp, $nameLength);
+        if ($nameData === false || strlen($nameData) < 6) continue;
+        $nh = unpack('nfmt/ncnt/nstrOff', substr($nameData, 0, 6));
+        $cnt = min((int)$nh['cnt'], 500);
+        $strOff = (int)$nh['strOff'];
+        for ($r = 0; $r < $cnt; $r++) {
+            $recPos = 6 + $r * 12;
+            if ($recPos + 12 > strlen($nameData)) break;
+            $rec = unpack('npid/neid/nlid/nnid/nlen/noff', substr($nameData, $recPos, 12));
+            // nameID 1=Font Family, 4=Full Name, 16=Typographic Family
+            if (!in_array($rec['nid'], array(1, 4, 16), true)) continue;
+            $sPos = $strOff + $rec['off'];
+            $sLen = $rec['len'];
+            if ($sPos < 0 || $sLen <= 0 || $sPos + $sLen > strlen($nameData)) continue;
+            $raw = substr($nameData, $sPos, $sLen);
+            $decoded = '';
+            if ($rec['pid'] === 3 || $rec['pid'] === 0) {
+                // Windows/Unicode UTF-16BE
+                $conv = @iconv('UTF-16BE', 'UTF-8//IGNORE', $raw);
+                if ($conv !== false) $decoded = trim($conv);
+            } elseif ($rec['pid'] === 1 && $rec['eid'] === 0) {
+                $decoded = trim($raw);
+            }
+            if ($decoded !== '' && !in_array($decoded, $names, true)) {
+                $names[] = $decoded;
+            }
+        }
+    }
+    fclose($fp);
+    return $names;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'font_dirs') {
+    header('Content-Type: application/json; charset=utf-8');
+    $parentRel = isset($_GET['parent']) ? trim(str_replace('\\', '/', $_GET['parent']), '/') : '';
+    if ($parentRel !== '' && !validateRelativePath($parentRel)) {
+        echo json_encode(array('success' => false, 'error' => 'Invalid path'));
+        exit;
+    }
+    $targetDir = ($parentRel !== '') ? realpath($baseDir . '/' . $parentRel) : $baseDir;
+    if ($targetDir === false || !is_dir($targetDir) || !isWithinBaseDir($targetDir, $baseDir)) {
+        echo json_encode(array('success' => false, 'error' => 'Directory not found'));
+        exit;
+    }
+    $fontExts = array('ttf', 'otf', 'ttc', 'woff2', 'woff');
+    $folders = array();
+    $curFontCount = 0;
+    $entries = @scandir($targetDir);
+    if ($entries !== false) {
+        foreach ($entries as $e) {
+            if ($e === '.' || $e === '..' || $e[0] === '.' || in_array($e, $ignoreList, true)) continue;
+            $full = $targetDir . '/' . $e;
+            if (is_link($full)) continue;
+            if (is_dir($full)) {
+                $subFonts = 0;
+                $hasSubDirs = false;
+                $subEntries = @scandir($full);
+                if ($subEntries !== false) {
+                    foreach ($subEntries as $se) {
+                        if ($se === '.' || $se === '..' || $se[0] === '.') continue;
+                        $sf = $full . '/' . $se;
+                        if (is_link($sf)) continue;
+                        if (is_dir($sf)) {
+                            $hasSubDirs = true;
+                        } else {
+                            $dp = strrpos($se, '.');
+                            $ext = ($dp !== false) ? strtolower(substr($se, $dp + 1)) : '';
+                            if (in_array($ext, $fontExts, true)) $subFonts++;
+                        }
+                    }
+                }
+                $relItem = ($parentRel !== '' ? $parentRel . '/' : '') . $e;
+                $folders[] = array(
+                    'name' => $e,
+                    'rel_path' => $relItem,
+                    'font_count' => $subFonts,
+                    'has_children' => $hasSubDirs
+                );
+            } else {
+                $dp = strrpos($e, '.');
+                $ext = ($dp !== false) ? strtolower(substr($e, $dp + 1)) : '';
+                if (in_array($ext, $fontExts, true)) $curFontCount++;
+            }
+        }
+    }
+    usort($folders, function($a, $b) {
+        if ($a['font_count'] !== $b['font_count']) return $b['font_count'] - $a['font_count'];
+        return strnatcasecmp($a['name'], $b['name']);
+    });
+    echo json_encode(array(
+        'success' => true,
+        'parent' => $parentRel,
+        'current_font_count' => $curFontCount,
+        'folders' => $folders
+    ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'font_index') {
+    header('Content-Type: application/json; charset=utf-8');
+    $rawFolders = isset($_GET['folders']) ? $_GET['folders'] : array();
+    if (is_string($rawFolders)) {
+        $rawFolders = ($rawFolders !== '') ? explode('|', $rawFolders) : array();
+    }
+    if (!is_array($rawFolders)) $rawFolders = array();
+    $rawFolders = array_slice(array_unique($rawFolders), 0, 20);
+
+    $fontExts = array('ttf', 'otf', 'ttc', 'woff2', 'woff');
+    $availableFonts = array();
+    $folderStats = array();
+    $allFontsList = array();
+
+    foreach ($rawFolders as $relF) {
+        $relF = trim(str_replace('\\', '/', (string)$relF), '/');
+        if ($relF !== '' && !validateRelativePath($relF)) continue;
+        $dirFull = ($relF !== '') ? realpath($baseDir . '/' . $relF) : $baseDir;
+        if ($dirFull === false || !is_dir($dirFull) || !isWithinBaseDir($dirFull, $baseDir)) {
+            $folderStats[$relF] = array('exists' => false, 'count' => 0, 'fonts' => array());
+            continue;
+        }
+        $entries = @scandir($dirFull);
+        $fList = array();
+        if ($entries !== false) {
+            foreach ($entries as $e) {
+                if (count($fList) >= 150) break;
+                if ($e === '.' || $e === '..' || $e[0] === '.') continue;
+                $full = $dirFull . '/' . $e;
+                if (!is_file($full) || is_link($full)) continue;
+                $dp = strrpos($e, '.');
+                $ext = ($dp !== false) ? strtolower(substr($e, $dp + 1)) : '';
+                if (!in_array($ext, $fontExts, true)) continue;
+                $itemRel = ($relF !== '' ? $relF . '/' : '') . $e;
+                $url = makeWebUrl($itemRel);
+                $names = extractFontFamilyNames($full);
+                $primaryName = !empty($names) ? $names[0] : $e;
+                foreach ($names as $nm) {
+                    $key = function_exists('mb_strtolower') ? mb_strtolower($nm, 'UTF-8') : strtolower($nm);
+                    if ($key !== '' && !isset($availableFonts[$key])) {
+                        $availableFonts[$key] = $url;
+                    }
+                }
+                $sz = (float)getSafeFileSize($full);
+                $entryObj = array(
+                    'name' => $primaryName,
+                    'aliases' => $names,
+                    'file' => $e,
+                    'rel_path' => $itemRel,
+                    'url' => $url,
+                    'size_formatted' => formatBytes($sz, 1)
+                );
+                $fList[] = $entryObj;
+                $allFontsList[] = $entryObj;
+            }
+        }
+        $folderStats[$relF] = array('exists' => true, 'count' => count($fList), 'fonts' => $fList);
+    }
+
+    echo json_encode(array(
+        'success' => true,
+        'available_fonts' => $availableFonts,
+        'folder_stats' => $folderStats,
+        'fonts' => $allFontsList
+    ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+// -------------------------------------------------------------
 // Action 1: Probe embedded subtitle streams in video (~0.5s)
 // -------------------------------------------------------------
 if (isset($_GET['action']) && $_GET['action'] === 'probe_subs') {
@@ -1036,7 +1258,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'hls_master') {
                 } else {
                     $subUri = 'api.php?action=hls_sub_m3u8&video=' . $encodedVideo . '&src=emb&stream=' . intval($tr['stream']) . '&codec=' . rawurlencode($tr['codec']) . '&dur=' . sprintf('%.3f', $dur) . '&ts=0&ext=.m3u8';
                 }
-                $subLines .= '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="' . $tr['name'] . '",DEFAULT=' . $defStr . ',AUTOSELECT=YES,FORCED=NO,LANGUAGE="' . $tr['lang'] . '",URI="' . $subUri . "\"\n";
+                $subLines .= '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="' . $tr['name'] . '",DEFAULT=' . $defStr . ',AUTOSELECT=' . $defStr . ',FORCED=NO,LANGUAGE="' . $tr['lang'] . '",URI="' . $subUri . "\"\n";
             }
         }
 

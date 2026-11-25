@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>MyCloud Media Player</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2.5'%3E%3C/rect%3E%3Cpolygon points='10 9 15 12 10 15 10 9' fill='%2338bdf8'%3E%3C/polygon%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=20261122_1">
+    <link rel="stylesheet" href="style.css?v=20261125_6">
 </head>
 <body>
     <div class="app-container">
@@ -25,6 +25,10 @@
                 <button id="clear-search" class="clear-btn" title="검색어 지우기">&times;</button>
             </div>
             <div class="nav-actions">
+                <button id="settings-btn" class="btn btn-secondary" title="ASS 자막 및 폰트 설정">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <span>설정</span>
+                </button>
                 <button id="refresh-btn" class="btn btn-secondary" title="새로고침">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
                     <span>새로고침</span>
@@ -143,6 +147,7 @@
                     </video>
                     <!-- Custom High-Fidelity Subtitle Overlay -->
                     <div id="subtitle-box" class="subtitle-box" style="display:none;"></div>
+                    <button id="btn-exit-pseudo-fs" class="btn-exit-pseudo-fs" type="button" style="display:none;" title="전체화면 닫기">&times; 닫기</button>
                 </div>
             </div>
             <!-- Player Toolbar -->
@@ -156,6 +161,11 @@
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
                         <span>외부 자막</span>
                     </button>
+                    <button id="player-settings-btn" class="btn btn-small" title="ASS 자막 엔진 및 폰트 폴더 설정">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        <span>폰트 설정</span>
+                    </button>
+                    <span id="ass-engine-badge" class="ass-engine-badge" style="display:none;" title="libass WebAssembly 렌더링 활성">ASS WASM</span>
                     <input type="file" id="custom-sub-input" accept=".smi,.sami,.srt,.ass,.ssa,.vtt" style="display:none">
                 </div>
                 <div class="control-group">
@@ -183,9 +193,82 @@
         </div>
     </div>
 
+    <!-- Settings Modal (ASS Renderer & On-Demand Font Folder Manager) -->
+    <div id="settings-modal" class="settings-overlay" role="dialog" aria-modal="true" aria-label="플레이어 설정">
+        <div class="settings-dialog">
+            <div class="settings-header">
+                <div class="settings-title-group">
+                    <span class="settings-title-icon" aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    </span>
+                    <h2>자막 · 폰트 설정</h2>
+                </div>
+                <button id="close-settings-btn" class="btn-close" title="닫기 (Esc)" aria-label="설정 닫기">&times;</button>
+            </div>
+
+            <div class="settings-body">
+                <!-- Section 1: ASS Rendering Engine -->
+                <section class="settings-section">
+                    <div class="settings-section-label">ASS 자막 렌더링</div>
+                    <div class="settings-card">
+                        <div class="settings-row">
+                            <div class="settings-row-info">
+                                <div class="settings-row-title">ASS 고급 렌더링 (libass WASM)</div>
+                                <div class="settings-row-desc">자막의 원본 위치·색상·외곽선·특수효과를 그대로 렌더링하여 겹침을 방지합니다.</div>
+                            </div>
+                            <label class="ios-switch" aria-label="ASS 고급 렌더링 사용">
+                                <input type="checkbox" id="setting-ass-enabled" checked>
+                                <span class="ios-switch-track"></span>
+                            </label>
+                        </div>
+                        <div class="settings-row settings-row-bordered">
+                            <div class="settings-row-info">
+                                <div class="settings-row-title">기본 폴백 폰트</div>
+                                <div class="settings-row-desc">자막에 지정된 폰트가 없을 때 사용할 한글 지원 폰트</div>
+                            </div>
+                            <select id="setting-fallback-font" class="settings-select">
+                                <option value="">내장 기본 폰트</option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section 2: Font Folders (Per-Device On-Demand Loading) -->
+                <section class="settings-section">
+                    <div class="settings-section-head">
+                        <div>
+                            <div class="settings-section-label" style="margin-bottom:2px;">폰트 폴더 관리</div>
+                            <div class="settings-row-desc">이 기기에서 켠 폴더의 폰트만 자막 요청 시 필요한 파일만 내려받습니다.</div>
+                        </div>
+                        <button id="btn-toggle-font-picker" class="btn btn-small settings-add-btn" type="button">+ 폴더 추가</button>
+                    </div>
+
+                    <!-- Inline NAS Folder Picker -->
+                    <div id="font-folder-picker" class="font-folder-picker" style="display:none;">
+                        <div class="font-picker-bar">
+                            <button id="btn-picker-up" class="btn btn-small" type="button" disabled>상위</button>
+                            <span id="font-picker-path" class="font-picker-path">Public</span>
+                            <button id="btn-picker-add-current" class="btn btn-small settings-primary-btn" type="button">이 폴더 추가</button>
+                        </div>
+                        <div id="font-picker-list" class="font-picker-list"></div>
+                    </div>
+
+                    <!-- Registered Font Folders List -->
+                    <div id="font-folders-list" class="font-folders-list"></div>
+                </section>
+            </div>
+
+            <div class="settings-footer">
+                <span id="settings-font-summary" class="settings-summary-text">활성 폰트 0개</span>
+                <button id="btn-settings-done" class="btn btn-small settings-primary-btn" type="button">적용 및 닫기</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
 
-    <script src="app.js?v=20261123_2"></script>
+    <script src="jassub/jassub.umd.js?v=1.7.17"></script>
+    <script src="app.js?v=20261125_9"></script>
 </body>
 </html>
