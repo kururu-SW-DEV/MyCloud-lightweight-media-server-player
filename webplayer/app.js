@@ -439,10 +439,53 @@ if (btnExitPseudoFs) {
         setIosPseudoFullscreen(false);
     });
 }
+const btnWrapperFs = document.getElementById('btn-wrapper-fs');
+let wrapperControlsHideTimer = null;
+function syncWrapperFsControl() {
+    const assDesktop = (typeof isJassubActive !== 'undefined' && isJassubActive && !isIOSDevice());
+    if (videoPlayer) {
+        if (assDesktop) {
+            videoPlayer.setAttribute('controlsList', 'nofullscreen');
+        } else {
+            videoPlayer.removeAttribute('controlsList');
+        }
+    }
+    if (btnWrapperFs) {
+        btnWrapperFs.style.display = assDesktop ? 'inline-flex' : 'none';
+        const inFs = isFullscreen();
+        btnWrapperFs.innerHTML = inFs ? PLAYER_SVG.exitFullscreen : PLAYER_SVG.fullscreen;
+        btnWrapperFs.title = inFs ? '전체화면 해제 (단축키: F 또는 Esc)' : 'ASS 전체화면 (단축키: F 또는 더블클릭)';
+    }
+}
+function revealWrapperFsBtn() {
+    if (!videoWrapper || !btnWrapperFs || btnWrapperFs.style.display === 'none') return;
+    videoWrapper.classList.add('controls-visible');
+    if (wrapperControlsHideTimer) clearTimeout(wrapperControlsHideTimer);
+    wrapperControlsHideTimer = setTimeout(() => {
+        videoWrapper.classList.remove('controls-visible');
+    }, 2200);
+}
+if (btnWrapperFs) {
+    btnWrapperFs.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleFullscreen();
+    });
+}
 if (videoWrapper) {
     videoWrapper.addEventListener('touchstart', () => {
         if (isIosPseudoFullscreen) revealPseudoFsExitBtn();
+        revealWrapperFsBtn();
     }, { passive: true });
+    videoWrapper.addEventListener('mousemove', () => {
+        revealWrapperFsBtn();
+    }, { passive: true });
+    videoWrapper.addEventListener('mouseleave', () => {
+        if (wrapperControlsHideTimer) {
+            clearTimeout(wrapperControlsHideTimer);
+            wrapperControlsHideTimer = null;
+        }
+        videoWrapper.classList.remove('controls-visible');
+    });
     videoWrapper.addEventListener('click', () => {
         if (isIosPseudoFullscreen) revealPseudoFsExitBtn();
     });
@@ -788,7 +831,34 @@ function handleFullscreenSubtitleSync() {
     applySubtitleStyle();
 }
 
+let lastFullscreenEl = null;
+
 function handleFullscreenChange() {
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement || null;
+    const assOnDesktop = (typeof isJassubActive !== 'undefined' && isJassubActive && !isIOSDevice() && videoWrapper);
+
+    // Case A: User was in videoWrapper fullscreen (ASS) and clicked <video>'s native
+    // fullscreen square button, which Chrome interprets as requesting fullscreen on <video>.
+    // Treat that click as an EXIT fullscreen request instead!
+    if (lastFullscreenEl === videoWrapper && fsEl === videoPlayer) {
+        lastFullscreenEl = null;
+        exitFullscreenSafe();
+        return;
+    }
+
+    // Case B: User clicked <video>'s native fullscreen square button from windowed mode
+    // while JASSUB ASS is active on desktop. Promote immediately to videoWrapper fullscreen
+    // so ASS canvas stays visible (no fallback to plain WebVTT text captions).
+    if (!lastFullscreenEl && fsEl === videoPlayer && assOnDesktop && typeof videoWrapper.requestFullscreen === 'function') {
+        lastFullscreenEl = videoWrapper;
+        videoWrapper.requestFullscreen().catch(() => {
+            lastFullscreenEl = videoPlayer;
+            handleFullscreenSubtitleSync();
+        });
+        return;
+    }
+
+    lastFullscreenEl = fsEl;
     const isFs = isFullscreen();
 
     // See the .video-wrapper:fullscreen rule in style.css for why this class
@@ -802,6 +872,9 @@ function handleFullscreenChange() {
             ? `${PLAYER_SVG.exitFullscreen} <span>창모드</span>` 
             : `${PLAYER_SVG.fullscreen} <span>전체화면</span>`;
         fullscreenBtn.title = isFs ? '전체화면 해제 (단축키: F 또는 Esc)' : '전체화면 (단축키: F 또는 더블클릭)';
+    }
+    if (typeof syncWrapperFsControl === 'function') {
+        syncWrapperFsControl();
     }
 
     handleFullscreenSubtitleSync();
@@ -2876,6 +2949,9 @@ function updateAssEngineBadge(active) {
     const badge = document.getElementById('ass-engine-badge');
     if (badge) {
         badge.style.display = active ? 'inline-flex' : 'none';
+    }
+    if (typeof syncWrapperFsControl === 'function') {
+        syncWrapperFsControl();
     }
 }
 

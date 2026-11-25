@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>MyCloud Media Player</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2.5'%3E%3C/rect%3E%3Cpolygon points='10 9 15 12 10 15 10 9' fill='%2338bdf8'%3E%3C/polygon%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=20261125_9">
+    <link rel="stylesheet" href="style.css?v=20261125_12">
 </head>
 <body>
     <div class="app-container">
@@ -129,13 +129,6 @@
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                         <span id="video-speed-text" class="roll-num">1.0x</span>
                     </button>
-                    <button id="direct-link-btn" class="btn btn-small btn-copy-motion" title="동영상 직접 재생 링크 복사">
-                        <span class="copy-icon-wrap" aria-hidden="true">
-                            <svg class="icon-copy" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-                            <svg class="icon-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                        </span>
-                        <span class="copy-label">링크</span>
-                    </button>
                     <button id="minimize-btn" class="btn btn-small" title="최소화 (영상은 계속 재생됨, 단축키: M)">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="20" y2="12"></line></svg>
                         <span>최소화</span>
@@ -154,6 +147,9 @@
                     </video>
                     <!-- Custom High-Fidelity Subtitle Overlay -->
                     <div id="subtitle-box" class="subtitle-box" style="display:none;"></div>
+                    <button id="btn-wrapper-fs" class="btn-wrapper-fs" type="button" style="display:none;" title="ASS 전체화면 전환 (단축키: F)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+                    </button>
                     <button id="btn-exit-pseudo-fs" class="btn-exit-pseudo-fs" type="button" style="display:none;" title="전체화면 닫기">&times; 닫기</button>
                 </div>
             </div>
@@ -172,7 +168,6 @@
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                         <span>폰트 설정</span>
                     </button>
-                    <span id="ass-engine-badge" class="ass-engine-badge" style="display:none;" title="libass WebAssembly 렌더링 활성">ASS WASM</span>
                     <input type="file" id="custom-sub-input" accept=".smi,.sami,.srt,.ass,.ssa,.vtt" style="display:none">
                 </div>
                 <div class="control-group">
@@ -276,6 +271,6 @@
     <div id="toast" class="toast"></div>
 
     <script src="jassub/jassub.umd.js?v=1.7.17"></script>
-    <script src="app.js?v=20261125_14"></script>
+    <script src="app.js?v=20261125_17"></script>
 </body>
 </html>
