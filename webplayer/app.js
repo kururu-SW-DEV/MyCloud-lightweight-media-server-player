@@ -2977,16 +2977,9 @@ async function activateAssRendererIfEnabled(assText) {
 
     let pickerCurrentPath = '';
     let allStatsCache = {};
+    let settingsRefreshSeq = 0;
 
-    async function refreshSettingsUI() {
-        if (chkAssEnabled) chkAssEnabled.checked = !!assSettings.assEnabled;
-
-        // Fetch stats for all registered folders (so even disabled folders show font counts)
-        const allPaths = assSettings.fontFolders.map(f => f.path);
-        const allData = await fetchFontIndexForPaths(allPaths, false);
-        allStatsCache = allData.folder_stats || {};
-
-        // Compute enabled-only font list for fallback selector & summary
+    function updateSummaryAndFallback() {
         const enabledFonts = [];
         let enabledFolderCount = 0;
         assSettings.fontFolders.forEach(f => {
@@ -2998,7 +2991,6 @@ async function activateAssRendererIfEnabled(assText) {
             }
         });
 
-        // Update fallback font dropdown
         if (selFallbackFont) {
             const curVal = assSettings.fallbackFont || '';
             selFallbackFont.innerHTML = '<option value="">내장 기본 폰트 (자동 선택)</option>';
@@ -3015,10 +3007,31 @@ async function activateAssRendererIfEnabled(assText) {
             selFallbackFont.value = seen.has(curVal.toLowerCase()) ? curVal.toLowerCase() : '';
         }
 
-        // Update summary footer
         if (summaryEl) {
             summaryEl.textContent = `활성 폴더 ${enabledFolderCount}개 · 온디맨드 폰트 ${enabledFonts.length}개`;
         }
+    }
+
+    function getFolderSubText(folder, st) {
+        if (!st || !st.exists) return '폴더를 찾을 수 없음';
+        return folder.enabled
+            ? `폰트 ${st.count}개 · 자막 요청 시 자동 로드`
+            : `폰트 ${st.count}개 · 이 기기에서 비활성화됨`;
+    }
+
+    async function refreshSettingsUI(refetch = true) {
+        const mySeq = ++settingsRefreshSeq;
+        if (chkAssEnabled) chkAssEnabled.checked = !!assSettings.assEnabled;
+
+        if (refetch) {
+            // Fetch stats for all registered folders (so even disabled folders show font counts)
+            const allPaths = assSettings.fontFolders.map(f => f.path);
+            const allData = await fetchFontIndexForPaths(allPaths, false);
+            if (mySeq !== settingsRefreshSeq) return;
+            allStatsCache = allData.folder_stats || {};
+        }
+
+        updateSummaryAndFallback();
 
         // Render registered font folder cards
         if (foldersListEl) {
@@ -3038,11 +3051,7 @@ async function activateAssRendererIfEnabled(assText) {
                 card.className = 'font-folder-card' + (folder.enabled ? ' enabled' : '');
 
                 const displayPath = folder.path ? `Public/${folder.path}` : 'Public (루트)';
-                const subText = !st.exists
-                    ? '폴더를 찾을 수 없음'
-                    : (folder.enabled
-                        ? `폰트 ${st.count}개 · 자막 요청 시 자동 로드`
-                        : `폰트 ${st.count}개 · 이 기기에서 비활성화됨`);
+                const subText = getFolderSubText(folder, st);
 
                 card.innerHTML = `
                     <div class="font-folder-meta">
@@ -3057,15 +3066,21 @@ async function activateAssRendererIfEnabled(assText) {
                         <button type="button" class="font-folder-remove" title="목록에서 제거">&times;</button>
                     </div>
                 `;
+                const subEl = card.querySelector('.font-folder-sub');
                 card.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
-                    assSettings.fontFolders[idx].enabled = e.target.checked;
+                    // Update in-place without refetching or destroying the toggle DOM
+                    // so rapid OFF -> ON taps work immediately and keep the spring animation smooth
+                    folder.enabled = e.target.checked;
                     saveAssSettings();
-                    refreshSettingsUI();
+                    card.classList.toggle('enabled', folder.enabled);
+                    const curSt = allStatsCache[folder.path] || { exists: true, count: 0 };
+                    if (subEl) subEl.textContent = getFolderSubText(folder, curSt);
+                    updateSummaryAndFallback();
                 });
                 card.querySelector('.font-folder-remove').addEventListener('click', () => {
                     assSettings.fontFolders.splice(idx, 1);
                     saveAssSettings();
-                    refreshSettingsUI();
+                    refreshSettingsUI(false);
                 });
                 foldersListEl.appendChild(card);
             });
