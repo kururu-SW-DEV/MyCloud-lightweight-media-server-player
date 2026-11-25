@@ -322,8 +322,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'font_index') {
 
     echo json_encode(array(
         'success' => true,
-        'available_fonts' => $availableFonts,
-        'folder_stats' => $folderStats,
+        'available_fonts' => (object)$availableFonts,
+        'folder_stats' => (object)$folderStats,
         'fonts' => $allFontsList
     ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;

@@ -265,6 +265,7 @@ if (resizeHandle && modalDialog) {
         const fh = modalDialog.style.height;
         if (fw) safeSetItem('mycloud_player_width', fw);
         if (fh) safeSetItem('mycloud_player_height', fh);
+        if (typeof resizeJassubIfActive === 'function') resizeJassubIfActive();
     };
 
     resizeHandle.addEventListener('pointerup', endResize);
@@ -278,6 +279,7 @@ if (resizeHandle && modalDialog) {
         safeRemoveItem('mycloud_player_width');
         safeRemoveItem('mycloud_player_height');
         centerModalDialog();
+        if (typeof resizeJassubIfActive === 'function') resizeJassubIfActive();
         showToast('창 크기가 기본값으로 초기화되었습니다.');
     });
 }
@@ -548,6 +550,7 @@ function restoreFromMinimize() {
         modalDialog.style.height = '';
         centerModalDialog();
     }
+    if (typeof resizeJassubIfActive === 'function') resizeJassubIfActive();
 }
 
 function toggleMinimize() {
@@ -2317,6 +2320,12 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     if (e.key === 'Escape' && playerModal.classList.contains('active')) {
+        if (isIosPseudoFullscreen) {
+            setIosPseudoFullscreen(false);
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
         if (isFullscreen()) {
             exitFullscreenSafe();
             e.preventDefault();
@@ -2398,11 +2407,13 @@ document.addEventListener('keydown', (e) => {
         } else if (e.key === '[') {
             subtitleOffset -= 0.5;
             syncDisplay.textContent = (subtitleOffset >= 0 ? '+' : '') + subtitleOffset.toFixed(1) + 's';
+            if (typeof syncJassubTimeOffset === 'function') syncJassubTimeOffset();
             syncCuesToTextTrack();
             updateSubtitleDisplay();
         } else if (e.key === ']') {
             subtitleOffset += 0.5;
             syncDisplay.textContent = (subtitleOffset >= 0 ? '+' : '') + subtitleOffset.toFixed(1) + 's';
+            if (typeof syncJassubTimeOffset === 'function') syncJassubTimeOffset();
             syncCuesToTextTrack();
             updateSubtitleDisplay();
         } else if (e.shiftKey && (e.key === 'N' || e.key === 'n')) {
@@ -2505,6 +2516,7 @@ window.addEventListener('resize', () => {
     } else {
         centerModalDialog();
     }
+    if (typeof resizeJassubIfActive === 'function') resizeJassubIfActive();
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -2852,15 +2864,11 @@ async function activateAssRendererIfEnabled(assText) {
         availableFonts[k] = toAbsUrl(rawMap[k]);
     });
 
-    // Pick fallback font: user preference -> first font in enabled folders -> built-in Korean NanumGothic
+    // Pick fallback font: explicit user preference -> built-in Korean NanumGothic
+    // (All enabled NAS folder fonts remain in availableFonts for on-demand ASS script loading)
     let fallbackKey = 'nanumgothic';
     if (assSettings.fallbackFont && availableFonts[assSettings.fallbackFont.toLowerCase()]) {
         fallbackKey = assSettings.fallbackFont.toLowerCase();
-    } else if (fontData.fonts && fontData.fonts.length > 0) {
-        const firstKey = String(fontData.fonts[0].name || '').toLowerCase();
-        if (firstKey && availableFonts[firstKey]) {
-            fallbackKey = firstKey;
-        }
     }
     const fallbackUrl = availableFonts[fallbackKey] || defaultKoUrl;
 
