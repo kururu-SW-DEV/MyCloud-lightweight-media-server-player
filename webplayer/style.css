@@ -1101,7 +1101,7 @@ video::cue {
     flex-shrink: 0;
 }
 
-.modal-dialog.minimized .modal-header-actions .btn-small span:not(#video-speed-text) {
+.modal-dialog.minimized .modal-header-actions .btn-small span:not(#video-speed-text):not(.copy-icon-wrap) {
     display: none;
 }
 
@@ -1370,7 +1370,7 @@ video::cue {
 }
 
 @media (max-width: 480px) {
-    .modal-header-actions .btn-small span:not(#video-speed-text) {
+    .modal-header-actions .btn-small span:not(#video-speed-text):not(.copy-icon-wrap) {
         display: none;
     }
     .modal-header-actions .btn-small {
@@ -1900,7 +1900,235 @@ video::cue {
     border-radius: 999px;
     background: rgba(56, 189, 248, 0.16);
     color: var(--accent);
-    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* =========================================================================
+   DesignBookmark Motion Studies UI Enhancements
+   1) Segmented Control Spring Pill  2) Morph Island Toast
+   3) Number Stepper Roll            4) Copy Button Icon Morph
+   5) Liquid Glass Player Surfaces & Tactile Spring Toggle Switch
+   ========================================================================= */
+
+/* 1. Segmented Control Spring Sliding Pill */
+.view-mode-toggle,
+.layout-toggle,
+.meta-toggle {
+    position: relative;
+    isolation: isolate;
+}
+
+.view-mode-toggle.has-seg-pill .btn-mode,
+.layout-toggle.has-seg-pill .btn-layout,
+.meta-toggle.has-seg-pill .btn-layout {
+    position: relative;
+    z-index: 1;
+    background-color: transparent !important;
+    transition: color 0.2s ease, transform 0.14s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+.view-mode-toggle.has-seg-pill .btn-mode:active,
+.layout-toggle.has-seg-pill .btn-layout:active,
+.meta-toggle.has-seg-pill .btn-layout:active {
+    transform: scale(0.95);
+}
+
+.seg-pill {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 0;
+    border-radius: 6px;
+    background: linear-gradient(180deg, #56ccf2 0%, #38bdf8 100%);
+    box-shadow: 0 2px 8px rgba(56, 189, 248, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    z-index: 0;
+    pointer-events: none;
+    will-change: transform, width;
+    transition: transform 0.34s cubic-bezier(0.32, 1.25, 0.45, 1), width 0.3s cubic-bezier(0.32, 1.25, 0.45, 1);
+}
+
+.seg-pill.no-anim {
+    transition: none !important;
+}
+
+/* 2. Morph Island Toast */
+.toast {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100vw - 28px);
+    background: rgba(13, 20, 36, 0.88);
+    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    color: #f8fafc;
+    border: 1px solid rgba(56, 189, 248, 0.38);
+    font-size: 0.84rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    padding: 9px 18px;
+    border-radius: 999px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    transform: translateX(-50%) translateY(-24px) scale(0.82);
+    opacity: 0;
+    transition: transform 0.36s cubic-bezier(0.22, 1.32, 0.36, 1), opacity 0.22s ease;
+}
+
+.toast::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.85);
+    flex-shrink: 0;
+}
+
+.toast.show {
+    transform: translateX(-50%) translateY(0) scale(1);
+    opacity: 1;
+}
+
+.toast.toast-morph {
+    animation: islandMorphPop 0.26s cubic-bezier(0.22, 1.35, 0.36, 1);
+}
+
+@keyframes islandMorphPop {
+    0% { transform: translateX(-50%) translateY(0) scale(0.94); }
+    55% { transform: translateX(-50%) translateY(0) scale(1.035); }
+    100% { transform: translateX(-50%) translateY(0) scale(1); }
+}
+
+/* 3. Number Stepper Rolling Digits (Sync & Speed) */
+.sync-value,
+.roll-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    font-variant-numeric: tabular-nums;
+}
+
+.num-roll-up {
+    animation: numRollUp 0.22s cubic-bezier(0.22, 1.25, 0.36, 1);
+}
+
+.num-roll-down {
+    animation: numRollDown 0.22s cubic-bezier(0.22, 1.25, 0.36, 1);
+}
+
+@keyframes numRollUp {
+    0% { opacity: 0.2; transform: translateY(6px) scale(0.92); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes numRollDown {
+    0% { opacity: 0.2; transform: translateY(-6px) scale(0.92); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-dialog .btn-small:active {
+    transform: scale(0.93);
+}
+
+/* 4. Copy Button Icon Morph */
+.btn-copy-motion .copy-icon-wrap {
+    position: relative;
+    width: 12px;
+    height: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.btn-copy-motion .icon-copy,
+.btn-copy-motion .icon-check {
+    position: absolute;
+    inset: 0;
+    transition: transform 0.26s cubic-bezier(0.22, 1.35, 0.36, 1), opacity 0.18s ease;
+}
+
+.btn-copy-motion .icon-check {
+    opacity: 0;
+    transform: scale(0.4) rotate(-25deg);
+    color: #4ade80;
+}
+
+.btn-copy-motion.is-copied {
+    border-color: rgba(74, 222, 128, 0.5) !important;
+    background-color: rgba(34, 197, 94, 0.16) !important;
+    color: #86efac !important;
+}
+
+.btn-copy-motion.is-copied .icon-copy {
+    opacity: 0;
+    transform: scale(0.4) rotate(25deg);
+}
+
+.btn-copy-motion.is-copied .icon-check {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+}
+
+/* 5. Liquid Glass Player Surfaces & Tactile Spring Toggle Switch */
+.modal-dialog {
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    box-shadow: 0 28px 64px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.modal-header {
+    background: linear-gradient(180deg, rgba(28, 40, 62, 0.92) 0%, rgba(20, 29, 46, 0.92) 100%);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.modal-footer {
+    background: linear-gradient(180deg, rgba(18, 26, 42, 0.94) 0%, rgba(13, 19, 32, 0.96) 100%);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.btn-exit-pseudo-fs {
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.ios-switch-track {
+    transition: background-color 0.24s ease, box-shadow 0.24s ease;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.ios-switch-track::after {
+    transition: transform 0.28s cubic-bezier(0.32, 1.35, 0.45, 1), width 0.18s ease, left 0.18s ease;
+}
+
+.ios-switch:active .ios-switch-track::after {
+    width: 22px;
+}
+
+.ios-switch:active input:checked + .ios-switch-track::after {
+    left: -1px;
+}
+
+.ios-switch input:checked + .ios-switch-track {
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .seg-pill,
+    .toast,
+    .ios-switch-track::after,
+    .btn-copy-motion .icon-copy,
+    .btn-copy-motion .icon-check {
+        transition: none !important;
+        animation: none !important;
+    }
 }
 .font-count-pill.zero {
     background: rgba(148, 163, 184, 0.12);

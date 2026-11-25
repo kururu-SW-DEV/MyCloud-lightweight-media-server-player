@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>MyCloud Media Player</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2.5'%3E%3C/rect%3E%3Cpolygon points='10 9 15 12 10 15 10 9' fill='%2338bdf8'%3E%3C/polygon%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=20261125_7">
+    <link rel="stylesheet" href="style.css?v=20261125_9">
 </head>
 <body>
     <div class="app-container">
@@ -127,7 +127,14 @@
                     </button>
                     <button id="btn-video-speed" class="btn btn-small" title="재생 배속 변경 (단축키: > 또는 <)">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                        <span id="video-speed-text">1.0x</span>
+                        <span id="video-speed-text" class="roll-num">1.0x</span>
+                    </button>
+                    <button id="direct-link-btn" class="btn btn-small btn-copy-motion" title="동영상 직접 재생 링크 복사">
+                        <span class="copy-icon-wrap" aria-hidden="true">
+                            <svg class="icon-copy" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+                            <svg class="icon-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        </span>
+                        <span class="copy-label">링크</span>
                     </button>
                     <button id="minimize-btn" class="btn btn-small" title="최소화 (영상은 계속 재생됨, 단축키: M)">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="20" y2="12"></line></svg>
@@ -269,6 +276,6 @@
     <div id="toast" class="toast"></div>
 
     <script src="jassub/jassub.umd.js?v=1.7.17"></script>
-    <script src="app.js?v=20261125_10"></script>
+    <script src="app.js?v=20261125_12"></script>
 </body>
 </html>

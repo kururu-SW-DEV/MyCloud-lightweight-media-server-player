@@ -1311,10 +1311,6 @@ function renderGrid(dirs, videos) {
             let badgesHtml = '';
             if (v.subtitles && v.subtitles.length > 0) {
                 badgesHtml = v.subtitles.map(s => `<span class="badge badge-${s.ext}">${s.ext.toUpperCase()}</span>`).join('');
-            } else if (v.ext === 'mkv' || v.ext === 'mp4') {
-                badgesHtml = '<span class="badge badge-srt">내장자막지원</span>';
-            } else {
-                badgesHtml = '<span class="badge badge-none">자막없음</span>';
             }
             
             const folderTag = (currentMode === 'all' && v.folder)
@@ -1337,9 +1333,7 @@ function renderGrid(dirs, videos) {
                                 <span class="meta-size">${v.size_formatted}</span>
                                 <span class="meta-date">${(v.mtime_formatted || '').split(' ')[0]}</span>
                             </div>
-                            <div class="card-badges">
-                                ${badgesHtml}
-                            </div>
+                            ${badgesHtml ? `<div class="card-badges">${badgesHtml}</div>` : ''}
                         </div>
                     </div>
                 </div>
@@ -2223,7 +2217,7 @@ document.querySelectorAll('.sync-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const offset = parseFloat(btn.dataset.offset);
         subtitleOffset += offset;
-        syncDisplay.textContent = (subtitleOffset >= 0 ? '+' : '') + subtitleOffset.toFixed(1) + 's';
+        animateRollingValue(syncDisplay, (subtitleOffset >= 0 ? '+' : '') + subtitleOffset.toFixed(1) + 's', offset >= 0 ? 'up' : 'down');
         if (typeof syncJassubTimeOffset === 'function') syncJassubTimeOffset();
         syncCuesToTextTrack();
         updateSubtitleDisplay();
@@ -2231,8 +2225,9 @@ document.querySelectorAll('.sync-btn').forEach(btn => {
 });
 
 syncResetBtn.addEventListener('click', () => {
+    const dir = subtitleOffset > 0 ? 'down' : 'up';
     subtitleOffset = 0;
-    syncDisplay.textContent = '0.0s';
+    animateRollingValue(syncDisplay, '0.0s', dir);
     if (typeof syncJassubTimeOffset === 'function') syncJassubTimeOffset();
     syncCuesToTextTrack();
     updateSubtitleDisplay();
@@ -2406,13 +2401,13 @@ document.addEventListener('keydown', (e) => {
             updateSubtitleScale(subScale - 0.15);
         } else if (e.key === '[') {
             subtitleOffset -= 0.5;
-            syncDisplay.textContent = (subtitleOffset >= 0 ? '+' : '') + subtitleOffset.toFixed(1) + 's';
+            animateRollingValue(syncDisplay, (subtitleOffset >= 0 ? '+' : '') + subtitleOffset.toFixed(1) + 's', 'down');
             if (typeof syncJassubTimeOffset === 'function') syncJassubTimeOffset();
             syncCuesToTextTrack();
             updateSubtitleDisplay();
         } else if (e.key === ']') {
             subtitleOffset += 0.5;
-            syncDisplay.textContent = (subtitleOffset >= 0 ? '+' : '') + subtitleOffset.toFixed(1) + 's';
+            animateRollingValue(syncDisplay, (subtitleOffset >= 0 ? '+' : '') + subtitleOffset.toFixed(1) + 's', 'up');
             if (typeof syncJassubTimeOffset === 'function') syncJassubTimeOffset();
             syncCuesToTextTrack();
             updateSubtitleDisplay();
@@ -2424,13 +2419,44 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+let copyBtnResetTimer = null;
 if (directLinkBtn) {
-    directLinkBtn.addEventListener('click', () => {
+    directLinkBtn.addEventListener('click', async () => {
         if (!activeVideo) return;
         const fullUrl = window.location.origin + activeVideo.url;
-        navigator.clipboard.writeText(fullUrl).then(() => {
+        let copied = false;
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(fullUrl);
+                copied = true;
+            }
+        } catch (e) {}
+        if (!copied) {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = fullUrl;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                copied = document.execCommand('copy');
+                document.body.removeChild(ta);
+            } catch (e) {}
+        }
+        if (copied) {
+            directLinkBtn.classList.add('is-copied');
+            const lbl = directLinkBtn.querySelector('.copy-label');
+            if (lbl) lbl.textContent = '복사됨';
+            if (copyBtnResetTimer) clearTimeout(copyBtnResetTimer);
+            copyBtnResetTimer = setTimeout(() => {
+                directLinkBtn.classList.remove('is-copied');
+                if (lbl) lbl.textContent = '링크';
+                copyBtnResetTimer = null;
+            }, 1500);
             showToast('동영상 주소가 클립보드에 복사되었습니다!');
-        });
+        } else {
+            showToast('클립보드 복사를 지원하지 않는 환경입니다.');
+        }
     });
 }
 
@@ -2455,13 +2481,28 @@ refreshBtn.addEventListener('click', () => loadData(currentDir, currentMode));
 let toastTimer = null;
 function showToast(msg, duration = 2500) {
     if (!toastEl) return;
+    const wasVisible = toastEl.classList.contains('show');
     toastEl.textContent = msg;
     toastEl.classList.add('show');
+    if (wasVisible) {
+        toastEl.classList.remove('toast-morph');
+        void toastEl.offsetWidth;
+        toastEl.classList.add('toast-morph');
+    }
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
-        toastEl.classList.remove('show');
+        toastEl.classList.remove('show', 'toast-morph');
         toastTimer = null;
     }, duration);
+}
+
+function animateRollingValue(el, newText, direction = 'up') {
+    if (!el) return;
+    el.textContent = newText;
+    const cls = direction === 'down' ? 'num-roll-down' : 'num-roll-up';
+    el.classList.remove('num-roll-up', 'num-roll-down');
+    void el.offsetWidth;
+    el.classList.add(cls);
 }
 
 const _HTML_CHARS = /[&<>"']/;
@@ -2566,8 +2607,11 @@ let currentSpeedIndex = 1; // Default 1.0x
 
 function setVideoSpeed(speed) {
     if (!videoPlayer) return;
+    const prevSpeed = videoPlayer.playbackRate || 1.0;
     videoPlayer.playbackRate = speed;
-    if (videoSpeedText) videoSpeedText.textContent = `${speed.toFixed(speed % 1 === 0 ? 1 : 2)}x`;
+    if (videoSpeedText) {
+        animateRollingValue(videoSpeedText, `${speed.toFixed(speed % 1 === 0 ? 1 : 2)}x`, speed >= prevSpeed ? 'up' : 'down');
+    }
     showToast(`재생 배속: ${speed}x`);
 }
 
@@ -3145,4 +3189,66 @@ async function activateAssRendererIfEnabled(assText) {
             showToast(`폰트 폴더 추가됨: Public${pickerCurrentPath ? '/' + pickerCurrentPath : ''}`);
         });
     }
+})();
+
+// =========================================================================
+// 10. DesignBookmark Motion: Segmented Control Spring Sliding Pill
+// =========================================================================
+(function initSegmentedControls() {
+    const groups = document.querySelectorAll('.view-mode-toggle, .layout-toggle, .meta-toggle');
+    if (!groups || groups.length === 0) return;
+
+    const updaters = [];
+
+    groups.forEach(group => {
+        const pill = document.createElement('span');
+        pill.className = 'seg-pill no-anim';
+        pill.setAttribute('aria-hidden', 'true');
+        group.insertBefore(pill, group.firstChild);
+        group.classList.add('has-seg-pill');
+
+        const updatePill = (instant = false) => {
+            const activeBtn = group.querySelector('button.active');
+            if (!activeBtn) {
+                pill.style.opacity = '0';
+                return;
+            }
+            const left = activeBtn.offsetLeft;
+            const width = activeBtn.offsetWidth;
+            if (width <= 0) return;
+            if (instant) {
+                pill.classList.add('no-anim');
+            } else {
+                pill.classList.remove('no-anim');
+            }
+            pill.style.opacity = '1';
+            pill.style.width = `${width}px`;
+            pill.style.transform = `translate3d(${left}px, 0, 0)`;
+            if (instant) {
+                void pill.offsetWidth;
+                pill.classList.remove('no-anim');
+            }
+        };
+
+        updaters.push(updatePill);
+
+        const mo = new MutationObserver(() => updatePill(false));
+        group.querySelectorAll('button').forEach(btn => {
+            mo.observe(btn, { attributes: true, attributeFilter: ['class'] });
+        });
+
+        if (typeof ResizeObserver !== 'undefined') {
+            const ro = new ResizeObserver(() => updatePill(true));
+            ro.observe(group);
+        }
+    });
+
+    const syncAllInstant = () => updaters.forEach(fn => fn(true));
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(syncAllInstant));
+    } else {
+        requestAnimationFrame(syncAllInstant);
+    }
+    window.addEventListener('load', syncAllInstant);
+    window.addEventListener('resize', syncAllInstant);
 })();
