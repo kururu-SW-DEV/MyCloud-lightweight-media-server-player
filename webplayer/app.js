@@ -1412,8 +1412,18 @@ function renderGrid(dirs, videos) {
     if (videos && videos.length > 0) {
         videos.forEach(v => {
             let badgesHtml = '';
+            const wp = (typeof getWatchProgress === 'function') ? getWatchProgress(v.rel_path) : null;
+            let progressBarHtml = '';
+            if (wp && wp.done) {
+                badgesHtml += '<span class="badge badge-watched">시청완료</span>';
+                progressBarHtml = '<div class="card-progress-track"><div class="card-progress-fill" style="width:100%;"></div></div>';
+            } else if (wp && wp.t >= 10 && wp.d > 0) {
+                const pct = Math.min(99, Math.max(2, Math.round((wp.t / wp.d) * 100)));
+                badgesHtml += `<span class="badge badge-resume">${formatShortClock(wp.t)}</span>`;
+                progressBarHtml = `<div class="card-progress-track"><div class="card-progress-fill" style="width:${pct}%;"></div></div>`;
+            }
             if (v.subtitles && v.subtitles.length > 0) {
-                badgesHtml = v.subtitles.map(s => `<span class="badge badge-${s.ext}">${s.ext.toUpperCase()}</span>`).join('');
+                badgesHtml += v.subtitles.map(s => `<span class="badge badge-${s.ext}">${s.ext.toUpperCase()}</span>`).join('');
             }
             
             const isSearching = !!(searchInput && searchInput.value.trim());
@@ -1426,6 +1436,7 @@ function renderGrid(dirs, videos) {
                     <div class="card-thumbnail">
                         <span class="card-format-badge">${v.ext}</span>
                         <div class="play-icon-overlay">${PLAYER_SVG.play}</div>
+                        ${progressBarHtml}
                     </div>
                     <div class="card-content">
                         <div class="list-main-col">
@@ -1674,7 +1685,13 @@ window.openPlayer = async function(encodedRelPath) {
     if (startWithHls) {
         showToast('실시간 HLS 리먹싱 모드로 재생합니다.');
     }
-    attachVideoSource(video, startWithHls, 0);
+    const savedProg = (typeof getWatchProgress === 'function') ? getWatchProgress(video.rel_path) : null;
+    const resumeSec = (savedProg && !savedProg.done && savedProg.t >= 10) ? savedProg.t : 0;
+    attachVideoSource(video, startWithHls, resumeSec);
+    if (typeof hideResumeBanner === 'function') hideResumeBanner();
+    if (resumeSec > 0 && typeof showResumeBanner === 'function') {
+        showResumeBanner(resumeSec);
+    }
     
     clearSubtitles();
     
@@ -2401,6 +2418,12 @@ if (minimizeBtn) {
 }
 
 function closePlayer() {
+    if (typeof saveCurrentWatchProgress === 'function') {
+        saveCurrentWatchProgress(true);
+    }
+    if (typeof hideResumeBanner === 'function') {
+        hideResumeBanner();
+    }
     if (isIosPseudoFullscreen) {
         setIosPseudoFullscreen(false);
     }
@@ -2438,6 +2461,7 @@ function closePlayer() {
     hasCustomPosition = false;
     activeVideo = null;
     document.title = 'MyCloud Media Player';
+    applySortAndRender();
 }
 
 closePlayerBtn.addEventListener('click', closePlayer);
@@ -3522,3 +3546,139 @@ window.addEventListener('keydown', (e) => {
         }
     }
 });
+
+// =========================================================================
+// 12. Watch Progress & Resume Playback (Zero-Server LocalStorage LRU)
+// =========================================================================
+const WATCH_PROGRESS_KEY = 'mycloud_watch_progress_v1';
+const WATCH_PROGRESS_MAX = 300;
+let _watchProgressMap = null;
+let _lastProgressSaveAt = 0;
+let _resumeBannerTimer = null;
+
+function formatShortClock(sec) {
+    const s = Math.max(0, Math.floor(sec || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    const pad = n => String(n).padStart(2, '0');
+    return h > 0 ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
+}
+
+function loadWatchProgressMap() {
+    if (_watchProgressMap) return _watchProgressMap;
+    try {
+        const raw = localStorage.getItem(WATCH_PROGRESS_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        _watchProgressMap = (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch (e) {
+        _watchProgressMap = {};
+    }
+    return _watchProgressMap;
+}
+
+function persistWatchProgressMap() {
+    if (!_watchProgressMap) return;
+    try {
+        const keys = Object.keys(_watchProgressMap);
+        if (keys.length > WATCH_PROGRESS_MAX) {
+            keys.sort((a, b) => ((_watchProgressMap[a] && _watchProgressMap[a].u) || 0) - ((_watchProgressMap[b] && _watchProgressMap[b].u) || 0));
+            const removeCount = keys.length - WATCH_PROGRESS_MAX;
+            for (let i = 0; i < removeCount; i++) {
+                delete _watchProgressMap[keys[i]];
+            }
+        }
+        localStorage.setItem(WATCH_PROGRESS_KEY, JSON.stringify(_watchProgressMap));
+    } catch (e) {}
+}
+
+function getWatchProgress(relPath) {
+    if (!relPath) return null;
+    const map = loadWatchProgressMap();
+    return map[relPath] || null;
+}
+
+function saveCurrentWatchProgress(force = false) {
+    if (!activeVideo || !videoPlayer) return;
+    const now = Date.now();
+    if (!force && (now - _lastProgressSaveAt) < 4500) return;
+    const cur = videoPlayer.currentTime;
+    const dur = videoPlayer.duration;
+    if (!isFinite(cur) || !isFinite(dur) || dur < 15) return;
+    _lastProgressSaveAt = now;
+
+    const map = loadWatchProgressMap();
+    const key = activeVideo.rel_path;
+    const nearEnd = (cur / dur >= 0.95) || (dur > 60 && (dur - cur) <= 20);
+    if (nearEnd) {
+        map[key] = { t: 0, d: Math.floor(dur), done: true, u: now };
+        persistWatchProgressMap();
+    } else if (cur >= 10) {
+        map[key] = { t: Math.floor(cur), d: Math.floor(dur), done: false, u: now };
+        persistWatchProgressMap();
+    }
+}
+
+function hideResumeBanner() {
+    const banner = document.getElementById('resume-banner');
+    if (_resumeBannerTimer) {
+        clearTimeout(_resumeBannerTimer);
+        _resumeBannerTimer = null;
+    }
+    if (banner) {
+        banner.classList.remove('show');
+        banner.style.display = 'none';
+    }
+}
+
+function showResumeBanner(sec) {
+    const banner = document.getElementById('resume-banner');
+    const txt = document.getElementById('resume-banner-text');
+    if (!banner || !txt) return;
+    txt.textContent = `${formatShortClock(sec)}부터 이어보기`;
+    banner.style.display = 'inline-flex';
+    requestAnimationFrame(() => banner.classList.add('show'));
+    if (_resumeBannerTimer) clearTimeout(_resumeBannerTimer);
+    _resumeBannerTimer = setTimeout(() => {
+        banner.classList.remove('show');
+        setTimeout(() => {
+            if (!banner.classList.contains('show')) banner.style.display = 'none';
+        }, 280);
+    }, 5500);
+}
+
+(function initWatchProgressHooks() {
+    const restartBtn = document.getElementById('btn-restart-video');
+    if (restartBtn) {
+        restartBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (videoPlayer) {
+                try { videoPlayer.currentTime = 0; } catch (err) {}
+                videoPlayer.play().catch(() => {});
+            }
+            if (activeVideo) {
+                const map = loadWatchProgressMap();
+                delete map[activeVideo.rel_path];
+                persistWatchProgressMap();
+            }
+            hideResumeBanner();
+            showToast('처음(00:00)부터 재생합니다.');
+        });
+    }
+    if (videoPlayer) {
+        videoPlayer.addEventListener('timeupdate', () => saveCurrentWatchProgress(false));
+        videoPlayer.addEventListener('pause', () => saveCurrentWatchProgress(true));
+        videoPlayer.addEventListener('seeked', () => saveCurrentWatchProgress(true));
+        videoPlayer.addEventListener('ended', () => {
+            if (!activeVideo) return;
+            const dur = isFinite(videoPlayer.duration) ? Math.floor(videoPlayer.duration) : 0;
+            const map = loadWatchProgressMap();
+            map[activeVideo.rel_path] = { t: 0, d: dur, done: true, u: Date.now() };
+            persistWatchProgressMap();
+        });
+    }
+    window.addEventListener('pagehide', () => saveCurrentWatchProgress(true));
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') saveCurrentWatchProgress(true);
+    });
+})();

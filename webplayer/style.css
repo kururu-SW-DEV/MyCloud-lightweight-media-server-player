@@ -2548,3 +2548,93 @@ video::cue {
     font-size: 0.72rem;
     color: var(--text-muted);
 }
+
+/* =========================================================================
+   Watch Progress & Resume Playback UI
+   ========================================================================= */
+.card-progress-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3.5px;
+    background: rgba(15, 23, 42, 0.72);
+    z-index: 3;
+    overflow: hidden;
+}
+
+.card-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #38bdf8, #7dd3fc);
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.65);
+    border-radius: 0 2px 2px 0;
+}
+
+.video-grid.list-view .card-progress-track {
+    height: 3px;
+}
+
+.badge-resume {
+    background: rgba(56, 189, 248, 0.16);
+    color: #7dd3fc;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    font-variant-numeric: tabular-nums;
+}
+
+.badge-watched {
+    background: rgba(34, 197, 94, 0.16);
+    color: #86efac;
+    border: 1px solid rgba(74, 222, 128, 0.35);
+}
+
+.resume-banner {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px) scale(0.95);
+    z-index: 2147483645;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 8px 6px 14px;
+    border-radius: 999px;
+    background: rgba(13, 20, 36, 0.88);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(56, 189, 248, 0.42);
+    color: #f8fafc;
+    font-size: 0.78rem;
+    font-weight: 600;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.24s ease, transform 0.28s cubic-bezier(0.22, 1.28, 0.36, 1);
+    white-space: nowrap;
+}
+
+.resume-banner.show {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.resume-restart-btn {
+    background: rgba(56, 189, 248, 0.2);
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    color: #7dd3fc;
+    font-size: 0.74rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, transform 0.12s;
+}
+
+.resume-restart-btn:hover {
+    background: var(--accent);
+    color: #090d16;
+}
+
+.resume-restart-btn:active {
+    transform: scale(0.94);
+}

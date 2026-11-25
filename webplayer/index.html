@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>MyCloud Media Player</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2.5'%3E%3C/rect%3E%3Cpolygon points='10 9 15 12 10 15 10 9' fill='%2338bdf8'%3E%3C/polygon%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=20261125_16">
+    <link rel="stylesheet" href="style.css?v=20261125_17">
 </head>
 <body>
     <div class="app-container">
@@ -153,6 +153,10 @@
                     <button id="btn-wrapper-fs" class="btn-wrapper-fs" type="button" style="display:none;" title="ASS 전체화면 전환 (단축키: F)">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
                     </button>
+                    <div id="resume-banner" class="resume-banner" style="display:none;">
+                        <span id="resume-banner-text">이어서 재생</span>
+                        <button id="btn-restart-video" class="resume-restart-btn" type="button">처음부터</button>
+                    </div>
                     <button id="btn-exit-pseudo-fs" class="btn-exit-pseudo-fs" type="button" style="display:none;" title="전체화면 닫기">&times; 닫기</button>
                 </div>
             </div>
@@ -280,6 +284,6 @@
     <div id="toast" class="toast"></div>
 
     <script src="jassub/jassub.umd.js?v=1.7.17"></script>
-    <script src="app.js?v=20261125_19"></script>
+    <script src="app.js?v=20261125_20"></script>
 </body>
 </html>
