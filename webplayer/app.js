@@ -1371,6 +1371,8 @@ let isHlsRemuxActive = false;
 let hlsAutoFallbackAttempted = false;
 let _hlsScriptPromise = null;
 let activeNativeMetaHandler = null;
+let activeReadyPlayHandler = null;
+let activeReadyAbortHandler = null;
 
 function browserNeedsMkvRemux() {
     const ua = navigator.userAgent || '';
@@ -1380,11 +1382,25 @@ function browserNeedsMkvRemux() {
     return isIOS || isSafari || isFirefox;
 }
 
-function destroyHlsInstance() {
-    if (activeNativeMetaHandler && videoPlayer) {
+function clearPendingAutoPlayHandlers() {
+    if (!videoPlayer) return;
+    if (activeNativeMetaHandler) {
         videoPlayer.removeEventListener('loadedmetadata', activeNativeMetaHandler);
         activeNativeMetaHandler = null;
     }
+    if (activeReadyPlayHandler) {
+        videoPlayer.removeEventListener('canplay', activeReadyPlayHandler);
+        videoPlayer.removeEventListener('loadedmetadata', activeReadyPlayHandler);
+        activeReadyPlayHandler = null;
+    }
+    if (activeReadyAbortHandler) {
+        videoPlayer.removeEventListener('playing', activeReadyAbortHandler);
+        activeReadyAbortHandler = null;
+    }
+}
+
+function destroyHlsInstance() {
+    clearPendingAutoPlayHandlers();
     if (activeHlsInstance) {
         try { activeHlsInstance.destroy(); } catch (e) {}
         activeHlsInstance = null;
@@ -1422,6 +1438,32 @@ function updateHlsButtonUI(video) {
     }
 }
 
+function scheduleAutoPlayRetry(video, resumeTime = 0) {
+    if (!videoPlayer) return;
+    let seekApplied = !(resumeTime > 0);
+    const onReady = () => {
+        if (activeVideo !== video) {
+            clearPendingAutoPlayHandlers();
+            return;
+        }
+        if (!seekApplied && resumeTime > 0 && videoPlayer.readyState >= 1) {
+            seekApplied = true;
+            try { videoPlayer.currentTime = resumeTime; } catch (e) {}
+        }
+        if (videoPlayer.paused) {
+            videoPlayer.play().catch(() => {});
+        }
+    };
+    const onPlaying = () => {
+        clearPendingAutoPlayHandlers();
+    };
+    activeReadyPlayHandler = onReady;
+    activeReadyAbortHandler = onPlaying;
+    videoPlayer.addEventListener('loadedmetadata', onReady);
+    videoPlayer.addEventListener('canplay', onReady);
+    videoPlayer.addEventListener('playing', onPlaying);
+}
+
 async function attachVideoSource(video, useHls, resumeTime = 0) {
     if (!video || !videoPlayer) return;
     destroyHlsInstance();
@@ -1429,17 +1471,10 @@ async function attachVideoSource(video, useHls, resumeTime = 0) {
     updateHlsButtonUI(video);
 
     if (!isHlsRemuxActive) {
+        videoPlayer.preload = 'auto';
         videoPlayer.src = video.url;
-        if (resumeTime > 0) {
-            const onMeta = () => {
-                videoPlayer.removeEventListener('loadedmetadata', onMeta);
-                if (activeNativeMetaHandler === onMeta) activeNativeMetaHandler = null;
-                if (activeVideo !== video) return;
-                try { videoPlayer.currentTime = resumeTime; } catch (e) {}
-            };
-            activeNativeMetaHandler = onMeta;
-            videoPlayer.addEventListener('loadedmetadata', onMeta);
-        }
+        scheduleAutoPlayRetry(video, resumeTime);
+        videoPlayer.load();
         videoPlayer.play().catch(() => {});
         if (activeSubtitleTrackInfo) {
             syncCuesToTextTrack();
@@ -1453,17 +1488,8 @@ async function attachVideoSource(video, useHls, resumeTime = 0) {
     if (nativeHls === 'probably' || nativeHls === 'maybe') {
         videoPlayer.preload = 'auto';
         videoPlayer.src = hlsUrl;
-        if (resumeTime > 0) {
-            const onMeta = () => {
-                videoPlayer.removeEventListener('loadedmetadata', onMeta);
-                if (activeNativeMetaHandler === onMeta) activeNativeMetaHandler = null;
-                if (activeVideo !== video) return;
-                try { videoPlayer.currentTime = resumeTime; } catch (e) {}
-                if (videoPlayer.paused) videoPlayer.play().catch(() => {});
-            };
-            activeNativeMetaHandler = onMeta;
-            videoPlayer.addEventListener('loadedmetadata', onMeta);
-        }
+        scheduleAutoPlayRetry(video, resumeTime);
+        videoPlayer.load();
         videoPlayer.play().catch(() => {});
         return;
     }
@@ -1533,6 +1559,7 @@ window.openPlayer = async function(encodedRelPath) {
     // Activate modal BEFORE attaching media & calling play() so <video> is visible
     // in the render tree during the user gesture (required by iOS Safari).
     playerModal.classList.add('active');
+    if (videoPlayer) void videoPlayer.offsetWidth;
     applySubtitleStyle();
 
     const isMkv = (video.ext || '').toLowerCase() === 'mkv';
