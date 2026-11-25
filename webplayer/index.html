@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>MyCloud Media Player</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2.5'%3E%3C/rect%3E%3Cpolygon points='10 9 15 12 10 15 10 9' fill='%2338bdf8'%3E%3C/polygon%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css?v=20261125_12">
+    <link rel="stylesheet" href="style.css?v=20261125_16">
 </head>
 <body>
     <div class="app-container">
@@ -20,8 +20,8 @@
                 </span>
                 <h1>MyCloud <span>Media Player</span></h1>
             </div>
-            <div class="search-bar">
-                <input type="text" id="search-input" placeholder="영상 또는 폴더 검색..." autocomplete="off">
+            <div class="search-bar springy-search">
+                <input type="text" id="search-input" placeholder="영상 또는 폴더 검색 (하위 폴더 포함)..." autocomplete="off">
                 <button id="clear-search" class="clear-btn" title="검색어 지우기">&times;</button>
             </div>
             <div class="nav-actions">
@@ -29,9 +29,12 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                     <span>설정</span>
                 </button>
-                <button id="refresh-btn" class="btn btn-secondary" title="새로고침">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                    <span>새로고침</span>
+                <button id="refresh-btn" class="btn btn-secondary btn-load-success" title="새로고침">
+                    <span class="load-icon-wrap" aria-hidden="true">
+                        <svg class="icon-refresh" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                        <svg class="icon-done" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </span>
+                    <span class="refresh-label">새로고침</span>
                 </button>
                 <a href="/explorer/" class="btn btn-secondary btn-nav-switch" id="btn-explorer-nav" title="MyCloud Explorer로 이동">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
@@ -267,10 +270,16 @@
         </div>
     </div>
 
+    <!-- Pull-to-Refresh Indicator (Mobile) -->
+    <div id="ptr-indicator" class="ptr-indicator" aria-hidden="true">
+        <svg class="ptr-arrow" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+        <span id="ptr-text">당겨서 새로고침</span>
+    </div>
+
     <!-- Toast Notification -->
     <div id="toast" class="toast"></div>
 
     <script src="jassub/jassub.umd.js?v=1.7.17"></script>
-    <script src="app.js?v=20261125_17"></script>
+    <script src="app.js?v=20261125_19"></script>
 </body>
 </html>

@@ -1094,7 +1094,7 @@ async function loadData(dir = currentDir, mode = currentMode) {
         
         if (searchInput.value) {
             searchInput.value = '';
-            clearSearchBtn.style.display = 'none';
+            if (typeof syncClearSearchVisibility === 'function') syncClearSearchVisibility();
         }
     } catch (err) {
         if (err && err.name === 'AbortError') return;
@@ -1203,6 +1203,39 @@ function getSortedDirs(dirs, sortMode) {
     return result;
 }
 
+let _allVideosSearchCache = null;
+let _allVideosSearchLoading = null;
+
+async function ensureAllVideosSearchIndex() {
+    if (Array.isArray(_allVideosSearchCache)) return _allVideosSearchCache;
+    if (currentMode === 'all' && Array.isArray(currentVideos) && currentVideos.length > 0) {
+        _allVideosSearchCache = currentVideos;
+        return _allVideosSearchCache;
+    }
+    if (_allVideosSearchLoading) return _allVideosSearchLoading;
+    _allVideosSearchLoading = (async () => {
+        try {
+            const resp = await fetch('api.php?all=1');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            if (data && data.success && Array.isArray(data.videos)) {
+                for (let i = 0; i < data.videos.length; i++) {
+                    const v = data.videos[i];
+                    v._searchKey = ((v.name || '') + ' ' + (v.folder || '')).toLowerCase();
+                }
+                _allVideosSearchCache = data.videos;
+                return _allVideosSearchCache;
+            }
+        } catch (e) {}
+        return null;
+    })();
+    try {
+        return await _allVideosSearchLoading;
+    } finally {
+        _allVideosSearchLoading = null;
+    }
+}
+
 function applySortAndRender() {
     const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
     
@@ -1216,32 +1249,29 @@ function applySortAndRender() {
             return;
         } else {
             targetDirs = targetDirs.filter(d => (d._searchKey || d.name.toLowerCase()).includes(query));
-            targetVideos = targetVideos.filter(v => (v._searchKey || v.name.toLowerCase()).includes(query));
+            if (Array.isArray(_allVideosSearchCache)) {
+                // Search all videos under currentDir (or entire Public if at root)
+                const prefix = currentDir ? (currentDir + '/') : '';
+                const scoped = currentDir
+                    ? _allVideosSearchCache.filter(v => v.folder === currentDir || (v.folder && v.folder.startsWith(prefix)))
+                    : _allVideosSearchCache;
+                targetVideos = getSortedVideos(scoped, currentSort).filter(v => (v._searchKey || v.name.toLowerCase()).includes(query));
+            } else {
+                targetVideos = targetVideos.filter(v => (v._searchKey || v.name.toLowerCase()).includes(query));
+                // Load full index once in background so subfolder files appear immediately
+                ensureAllVideosSearchIndex().then(allList => {
+                    if (allList && searchInput && searchInput.value.toLowerCase().trim() === query && currentMode === 'folder') {
+                        applySortAndRender();
+                    }
+                });
+            }
             
             if (targetDirs.length === 0 && targetVideos.length === 0) {
-                // Plain button + addEventListener (no inline onclick) - escapeHtml()
-                // only neutralizes &/</>, not quotes, so interpolating `query`
-                // straight into an onclick="...'...'" attribute would let a
-                // search string containing a single quote break out of it.
                 videoGrid.innerHTML = `
                     <div class="loading-spinner">
-                        현재 폴더에 '<strong>${escapeHtml(query)}</strong>' 검색 결과가 없습니다.<br><br>
-                        <button type="button" class="btn btn-secondary search-all-fallback-btn">
-                            전체 영상 모아보기에서 검색하기
-                        </button>
+                        ${_allVideosSearchLoading ? '하위 폴더의 영상까지 검색하는 중...' : `'<strong>${escapeHtml(query)}</strong>' 검색 결과가 없습니다.`}
                     </div>
                 `;
-                const searchAllBtn = videoGrid.querySelector('.search-all-fallback-btn');
-                if (searchAllBtn) {
-                    searchAllBtn.addEventListener('click', async () => {
-                        // loadData() (called by switchMode) clears searchInput
-                        // itself once it resolves, so setting the query before
-                        // it finishes just gets wiped out - wait for it first.
-                        await switchMode('all');
-                        searchInput.value = query;
-                        applySortAndRender();
-                    });
-                }
                 return;
             }
         }
@@ -1386,7 +1416,8 @@ function renderGrid(dirs, videos) {
                 badgesHtml = v.subtitles.map(s => `<span class="badge badge-${s.ext}">${s.ext.toUpperCase()}</span>`).join('');
             }
             
-            const folderTag = (currentMode === 'all' && v.folder)
+            const isSearching = !!(searchInput && searchInput.value.trim());
+            const folderTag = ((currentMode === 'all' || isSearching) && v.folder)
                 ? `<div class="card-folder-path" title="${escapeHtml(v.folder)}">${PLAYER_SVG.folderSmall} <span>${escapeHtml(v.folder)}</span></div>`
                 : '';
                 
@@ -1616,7 +1647,10 @@ if (btnHlsRemux) {
 
 window.openPlayer = async function(encodedRelPath) {
     const relPath = decodeURIComponent(encodedRelPath);
-    const video = currentVideos.find(v => v.rel_path === relPath);
+    let video = currentVideos.find(v => v.rel_path === relPath);
+    if (!video && Array.isArray(_allVideosSearchCache)) {
+        video = _allVideosSearchCache.find(v => v.rel_path === relPath);
+    }
     if (!video) return;
     
     activeVideo = video;
@@ -2561,9 +2595,12 @@ if (directLinkBtn) {
 }
 
 let searchDebounceTimer = null;
+function syncClearSearchVisibility() {
+    if (!clearSearchBtn || !searchInput) return;
+    clearSearchBtn.classList.toggle('visible', searchInput.value.trim().length > 0);
+}
 searchInput.addEventListener('input', () => {
-    const query = searchInput.value.toLowerCase().trim();
-    clearSearchBtn.style.display = query ? 'block' : 'none';
+    syncClearSearchVisibility();
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => {
         applySortAndRender();
@@ -2572,11 +2609,33 @@ searchInput.addEventListener('input', () => {
 
 clearSearchBtn.addEventListener('click', () => {
     searchInput.value = '';
-    clearSearchBtn.style.display = 'none';
+    syncClearSearchVisibility();
     applySortAndRender();
+    searchInput.focus();
 });
 
-refreshBtn.addEventListener('click', () => loadData(currentDir, currentMode));
+let refreshSuccessTimer = null;
+async function triggerRefreshWithFeedback() {
+    if (!refreshBtn) return loadData(currentDir, currentMode);
+    _allVideosSearchCache = null;
+    if (refreshSuccessTimer) {
+        clearTimeout(refreshSuccessTimer);
+        refreshSuccessTimer = null;
+    }
+    const lbl = refreshBtn.querySelector('.refresh-label');
+    refreshBtn.classList.remove('is-success');
+    refreshBtn.classList.add('is-loading');
+    await loadData(currentDir, currentMode);
+    refreshBtn.classList.remove('is-loading');
+    refreshBtn.classList.add('is-success');
+    if (lbl) lbl.textContent = '완료';
+    refreshSuccessTimer = setTimeout(() => {
+        refreshBtn.classList.remove('is-success');
+        if (lbl) lbl.textContent = '새로고침';
+        refreshSuccessTimer = null;
+    }, 1200);
+}
+refreshBtn.addEventListener('click', () => triggerRefreshWithFeedback());
 
 let toastTimer = null;
 function showToast(msg, duration = 2500) {
@@ -3370,3 +3429,96 @@ async function activateAssRendererIfEnabled(assText) {
     window.addEventListener('load', syncAllInstant);
     window.addEventListener('resize', syncAllInstant);
 })();
+
+// =========================================================================
+// 11. DesignBookmark Motion: Pull-to-Refresh (Mobile) & Command Palette (Ctrl+K)
+// =========================================================================
+(function initPullToRefresh() {
+    const ptrEl = document.getElementById('ptr-indicator');
+    const ptrText = document.getElementById('ptr-text');
+    const ptrArrow = ptrEl ? ptrEl.querySelector('.ptr-arrow') : null;
+    if (!ptrEl) return;
+
+    let startY = 0;
+    let pulling = false;
+    let triggered = false;
+    let isRefreshing = false;
+
+    const hasOpenModal = () => {
+        const pm = document.getElementById('player-modal');
+        const sm = document.getElementById('settings-modal');
+        const cm = document.getElementById('cmd-palette-modal');
+        return (pm && pm.classList.contains('active')) ||
+               (sm && sm.classList.contains('active')) ||
+               (cm && cm.classList.contains('active'));
+    };
+
+    window.addEventListener('touchstart', (e) => {
+        if (isRefreshing || hasOpenModal() || window.scrollY > 2 || e.touches.length !== 1) return;
+        startY = e.touches[0].clientY;
+        pulling = true;
+        triggered = false;
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+        if (!pulling || isRefreshing || e.touches.length !== 1) return;
+        if (window.scrollY > 2) {
+            pulling = false;
+            return;
+        }
+        const dy = e.touches[0].clientY - startY;
+        if (dy <= 8) {
+            ptrEl.style.opacity = '0';
+            return;
+        }
+        const pullDist = Math.min(76, dy * 0.45);
+        triggered = pullDist >= 52;
+        ptrEl.classList.add('pulling');
+        ptrEl.classList.toggle('ready', triggered);
+        ptrEl.style.opacity = String(Math.min(1, pullDist / 36));
+        ptrEl.style.transform = `translate(-50%, ${Math.round(pullDist - 42)}px) scale(${(0.92 + Math.min(0.08, pullDist / 700)).toFixed(3)})`;
+        if (ptrArrow) ptrArrow.style.transform = triggered ? 'rotate(180deg)' : `rotate(${Math.round(Math.min(180, pullDist * 2.5))}deg)`;
+        if (ptrText) ptrText.textContent = triggered ? '놓으면 새로고침' : '당겨서 새로고침';
+    }, { passive: true });
+
+    const finishPull = async () => {
+        if (!pulling) return;
+        pulling = false;
+        ptrEl.classList.remove('pulling');
+        if (triggered && !isRefreshing) {
+            isRefreshing = true;
+            ptrEl.classList.add('refreshing');
+            ptrEl.style.opacity = '1';
+            ptrEl.style.transform = 'translate(-50%, 14px) scale(1)';
+            if (ptrText) ptrText.textContent = '새로고침 중...';
+            try {
+                await triggerRefreshWithFeedback();
+            } finally {
+                isRefreshing = false;
+                ptrEl.classList.remove('refreshing', 'ready');
+                ptrEl.style.opacity = '0';
+                ptrEl.style.transform = 'translate(-50%, -56px) scale(0.9)';
+                if (ptrArrow) ptrArrow.style.transform = '';
+            }
+        } else {
+            ptrEl.classList.remove('ready');
+            ptrEl.style.opacity = '0';
+            ptrEl.style.transform = 'translate(-50%, -56px) scale(0.9)';
+            if (ptrArrow) ptrArrow.style.transform = '';
+        }
+    };
+
+    window.addEventListener('touchend', finishPull, { passive: true });
+    window.addEventListener('touchcancel', finishPull, { passive: true });
+})();
+
+// Ctrl/Cmd + K focuses the single unified top search bar
+window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (searchInput) {
+            searchInput.focus();
+            searchInput.select();
+        }
+    }
+});

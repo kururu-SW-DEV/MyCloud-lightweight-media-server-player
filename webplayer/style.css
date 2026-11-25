@@ -2224,3 +2224,327 @@ video::cue {
         max-width: 100%;
     }
 }
+
+/* =========================================================================
+   DesignBookmark Motion Pack 2:
+   6) Springy Input   7) Loading-to-Success Refresh
+   8) Pull-to-Refresh 9) Command Palette (Ctrl+K)
+   ========================================================================= */
+
+/* 6. Springy Input (with iOS 16px anti-zoom) */
+.springy-search input {
+    transition: border-color 0.2s ease, box-shadow 0.25s cubic-bezier(0.22, 1.25, 0.36, 1), background-color 0.2s ease;
+    padding-right: 36px;
+}
+
+.springy-search input:focus,
+.springy-search input:focus-visible {
+    outline: none !important;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+}
+
+.springy-search .clear-btn {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    line-height: 1;
+    border-radius: 50%;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%) scale(0.5);
+    transition: opacity 0.18s ease, transform 0.24s cubic-bezier(0.22, 1.35, 0.36, 1), background-color 0.15s ease;
+}
+
+.springy-search .clear-btn:hover {
+    background: rgba(148, 163, 184, 0.2);
+    color: #f8fafc;
+}
+
+.springy-search .clear-btn.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(-50%) scale(1);
+}
+
+/* Prevent iOS Safari auto-zoom on input focus (requires >= 16px font-size) */
+@media (max-width: 768px) {
+    .search-bar input,
+    .springy-search input {
+        font-size: 16px;
+    }
+}
+
+/* 7. Loading-to-Success Button (#refresh-btn) */
+.btn-load-success .load-icon-wrap {
+    position: relative;
+    width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.btn-load-success .icon-refresh,
+.btn-load-success .icon-done {
+    position: absolute;
+    inset: 0;
+    transition: transform 0.24s cubic-bezier(0.22, 1.35, 0.36, 1), opacity 0.18s ease;
+}
+
+.btn-load-success .icon-done {
+    opacity: 0;
+    transform: scale(0.4) rotate(-25deg);
+    color: #4ade80;
+}
+
+.btn-load-success.is-loading .icon-refresh {
+    animation: refreshSpin 0.65s linear infinite;
+}
+
+.btn-load-success.is-success {
+    border-color: rgba(74, 222, 128, 0.5) !important;
+    background-color: rgba(34, 197, 94, 0.16) !important;
+    color: #86efac !important;
+}
+
+.btn-load-success.is-success .icon-refresh {
+    opacity: 0;
+    transform: scale(0.4) rotate(45deg);
+}
+
+.btn-load-success.is-success .icon-done {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+}
+
+@keyframes refreshSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* 8. Pull-to-Refresh Indicator (Mobile) */
+.ptr-indicator {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -56px) scale(0.9);
+    z-index: 99990;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    border-radius: 999px;
+    background: rgba(13, 20, 36, 0.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(56, 189, 248, 0.38);
+    color: #f8fafc;
+    font-size: 0.78rem;
+    font-weight: 600;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    opacity: 0;
+    transition: transform 0.28s cubic-bezier(0.22, 1.25, 0.36, 1), opacity 0.2s ease;
+}
+
+.ptr-indicator.pulling {
+    transition: none;
+}
+
+.ptr-indicator.ready {
+    border-color: rgba(74, 222, 128, 0.6);
+    color: #86efac;
+}
+
+.ptr-indicator .ptr-arrow {
+    color: var(--accent);
+    transition: transform 0.18s ease;
+}
+
+.ptr-indicator.ready .ptr-arrow {
+    color: #4ade80;
+}
+
+.ptr-indicator.refreshing .ptr-arrow {
+    animation: refreshSpin 0.65s linear infinite;
+}
+
+/* 9. Command Palette (Ctrl+K) */
+.cmd-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 100020;
+    background: rgba(5, 10, 20, 0.72);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    align-items: flex-start;
+    justify-content: center;
+    padding: min(12vh, 96px) 14px 14px;
+}
+
+.cmd-overlay.active {
+    display: flex;
+}
+
+.cmd-dialog {
+    width: 100%;
+    max-width: 560px;
+    background: rgba(15, 23, 42, 0.94);
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 14px;
+    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.72), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    animation: cmdPopIn 0.2s cubic-bezier(0.22, 1.28, 0.36, 1);
+}
+
+@keyframes cmdPopIn {
+    from { opacity: 0; transform: translateY(-10px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.cmd-input-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(24, 34, 53, 0.55);
+}
+
+.cmd-input-row input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none !important;
+    color: var(--text-main);
+    font-size: 0.95rem;
+    font-family: var(--font-stack);
+}
+
+.cmd-input-row input:focus-visible {
+    outline: none !important;
+}
+
+.cmd-esc-badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    padding: 2px 6px;
+    border-radius: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.cmd-list {
+    max-height: min(52vh, 380px);
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+}
+
+.cmd-list::-webkit-scrollbar,
+.settings-body::-webkit-scrollbar,
+.font-picker-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.cmd-list::-webkit-scrollbar-track,
+.settings-body::-webkit-scrollbar-track,
+.font-picker-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.cmd-list::-webkit-scrollbar-thumb,
+.settings-body::-webkit-scrollbar-thumb,
+.font-picker-list::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.25);
+    border-radius: 999px;
+}
+
+.cmd-list::-webkit-scrollbar-thumb:hover,
+.settings-body::-webkit-scrollbar-thumb:hover,
+.font-picker-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.45);
+}
+
+.cmd-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 11px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+
+.cmd-item:hover,
+.cmd-item.selected {
+    background: rgba(56, 189, 248, 0.16);
+}
+
+.cmd-item-main {
+    min-width: 0;
+    flex: 1;
+}
+
+.cmd-item-title {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cmd-item-folder {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
+
+.cmd-item-ext {
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 5px;
+    background: rgba(148, 163, 184, 0.16);
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.cmd-empty {
+    padding: 26px 14px;
+    text-align: center;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.cmd-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(15, 23, 42, 0.65);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
