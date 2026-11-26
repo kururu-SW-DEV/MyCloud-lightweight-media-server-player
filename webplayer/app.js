@@ -288,18 +288,22 @@ if (resizeHandle && modalDialog) {
 // Auto Next Video & Playlist Navigation
 // -------------------------------------------------------------
 function getActivePlaylist() {
-    const sorted = getSortedVideos(currentVideos, currentSort) || [];
     const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
     if (query && activeVideo) {
-        const filtered = sorted.filter(v => currentMode === 'all'
-            ? (v._searchKey || v.name.toLowerCase()).includes(query)
-            : ((v._searchKey || v.name.toLowerCase()).includes(query))
-        );
+        let searchPool = currentVideos;
+        if (currentMode === 'folder' && Array.isArray(_allVideosSearchCache)) {
+            const prefix = currentDir ? (currentDir + '/') : '';
+            searchPool = currentDir
+                ? _allVideosSearchCache.filter(v => v.folder === currentDir || (v.folder && v.folder.startsWith(prefix)))
+                : _allVideosSearchCache;
+        }
+        const sortedPool = getSortedVideos(searchPool, currentSort) || [];
+        const filtered = sortedPool.filter(v => (v._searchKey || v.name.toLowerCase()).includes(query));
         if (filtered.some(v => v.rel_path === activeVideo.rel_path)) {
             return filtered;
         }
     }
-    return sorted;
+    return getSortedVideos(currentVideos, currentSort) || [];
 }
 
 function playNextVideo() {
@@ -1663,7 +1667,11 @@ window.openPlayer = async function(encodedRelPath) {
         video = _allVideosSearchCache.find(v => v.rel_path === relPath);
     }
     if (!video) return;
-    
+
+    // Save previous video's watch progress before switching (e.g. Next/Prev button)
+    if (activeVideo && activeVideo.rel_path !== video.rel_path && typeof saveCurrentWatchProgress === 'function') {
+        saveCurrentWatchProgress(true);
+    }
     activeVideo = video;
     hlsAutoFallbackAttempted = false;
     userManuallySelectedSubtitle = false;
@@ -2492,9 +2500,11 @@ document.addEventListener('keydown', (e) => {
         if (e.code === 'Space' || e.key === ' ') {
             e.preventDefault();
             if (videoPlayer.paused) {
-                videoPlayer.play();
+                videoPlayer.play().catch(() => {});
+                if (typeof showPlayPauseFlash === 'function') showPlayPauseFlash(false);
             } else {
                 videoPlayer.pause();
+                if (typeof showPlayPauseFlash === 'function') showPlayPauseFlash(true);
             }
             return;
         }
@@ -2863,6 +2873,24 @@ function setupMediaSession(video) {
     } catch (e) {}
 }
 
+// Center Play/Pause ripple flash indicator (module-scoped for click + Space key)
+const playPauseFlashEl = document.getElementById('play-pause-flash');
+let playPauseFlashTimer = null;
+function showPlayPauseFlash(isNowPaused) {
+    if (!playPauseFlashEl) return;
+    playPauseFlashEl.innerHTML = isNowPaused
+        ? '<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4.5" height="16" rx="1.2"></rect><rect x="13.5" y="4" width="4.5" height="16" rx="1.2"></rect></svg>'
+        : '<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" style="margin-left:3px;"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>';
+    playPauseFlashEl.classList.remove('flash');
+    void playPauseFlashEl.offsetWidth;
+    playPauseFlashEl.classList.add('flash');
+    if (playPauseFlashTimer) clearTimeout(playPauseFlashTimer);
+    playPauseFlashTimer = setTimeout(() => {
+        playPauseFlashEl.classList.remove('flash');
+        playPauseFlashTimer = null;
+    }, 560);
+}
+
 if (videoPlayer) {
     videoPlayer.addEventListener('error', () => {
         if (!videoPlayer.getAttribute('src') || videoPlayer.src === window.location.href) return;
@@ -2907,24 +2935,6 @@ if (videoPlayer) {
     videoPlayer.addEventListener('ratechange', updateMediaSessionPosition);
     videoPlayer.addEventListener('loadedmetadata', updateMediaSessionPosition);
     
-    // Center Play/Pause ripple flash indicator
-    const playPauseFlashEl = document.getElementById('play-pause-flash');
-    let playPauseFlashTimer = null;
-    function showPlayPauseFlash(isNowPaused) {
-        if (!playPauseFlashEl) return;
-        playPauseFlashEl.innerHTML = isNowPaused
-            ? '<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4.5" height="16" rx="1.2"></rect><rect x="13.5" y="4" width="4.5" height="16" rx="1.2"></rect></svg>'
-            : '<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" style="margin-left:3px;"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>';
-        playPauseFlashEl.classList.remove('flash');
-        void playPauseFlashEl.offsetWidth;
-        playPauseFlashEl.classList.add('flash');
-        if (playPauseFlashTimer) clearTimeout(playPauseFlashTimer);
-        playPauseFlashTimer = setTimeout(() => {
-            playPauseFlashEl.classList.remove('flash');
-            playPauseFlashTimer = null;
-        }, 560);
-    }
-
     // Universal double-toggle-safe click-to-play/pause on the video surface:
     // Record paused state at click time; if the browser's native <video controls>
     // already toggled it, do nothing; otherwise toggle it ourselves (covers desktop
@@ -3505,10 +3515,8 @@ async function activateAssRendererIfEnabled(assText) {
     const hasOpenModal = () => {
         const pm = document.getElementById('player-modal');
         const sm = document.getElementById('settings-modal');
-        const cm = document.getElementById('cmd-palette-modal');
         return (pm && pm.classList.contains('active')) ||
-               (sm && sm.classList.contains('active')) ||
-               (cm && cm.classList.contains('active'));
+               (sm && sm.classList.contains('active'));
     };
 
     window.addEventListener('touchstart', (e) => {
