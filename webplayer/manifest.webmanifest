@@ -1,0 +1,26 @@
+{
+  "name": "MyCloud Media Player",
+  "short_name": "MyCloud Player",
+  "description": "경량 NAS 전용 웹 미디어 플레이어",
+  "start_url": "/player/",
+  "scope": "/player/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

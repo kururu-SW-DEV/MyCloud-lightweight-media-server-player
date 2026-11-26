@@ -2907,24 +2907,33 @@ if (videoPlayer) {
     videoPlayer.addEventListener('ratechange', updateMediaSessionPosition);
     videoPlayer.addEventListener('loadedmetadata', updateMediaSessionPosition);
     
-    // Note: Chrome, Edge, and Firefox <video controls> already toggle play/pause
-    // natively as the default action of clicking the video surface. Adding a second
-    // JS click listener on those browsers causes a double-toggle (JS pause() ->
-    // native default action play() within 1ms), preventing the video from pausing!
-    // Only desktop Safari lacks native canvas click-to-toggle on <video controls>.
+    // Universal double-toggle-safe click-to-play/pause on the video surface:
+    // Record paused state at click time; if the browser's native <video controls>
+    // already toggled it, do nothing; otherwise toggle it ourselves (covers desktop
+    // Safari, Chrome with ASS/controlsList, and mobile tap-to-pause cleanly).
+    let surfaceClickToggleTimer = null;
     videoPlayer.addEventListener('click', (e) => {
         if (e.target !== videoPlayer) return;
-        const ua = navigator.userAgent || '';
-        const isDesktopSafari = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(ua) && !isIOSDevice();
-        if (!isDesktopSafari) return;
-        const rect = videoPlayer.getBoundingClientRect();
-        if (rect.height > 80 && (e.clientY - rect.top) > rect.height - 48) return;
-        e.preventDefault();
-        if (videoPlayer.paused) {
-            videoPlayer.play().catch(() => {});
-        } else {
-            videoPlayer.pause();
+        if (e.detail >= 2) {
+            if (surfaceClickToggleTimer) {
+                clearTimeout(surfaceClickToggleTimer);
+                surfaceClickToggleTimer = null;
+            }
+            return;
         }
+        const rect = videoPlayer.getBoundingClientRect();
+        if (rect.height > 90 && (e.clientY - rect.top) > rect.height - 54) return;
+        const wasPaused = videoPlayer.paused;
+        if (surfaceClickToggleTimer) clearTimeout(surfaceClickToggleTimer);
+        surfaceClickToggleTimer = setTimeout(() => {
+            surfaceClickToggleTimer = null;
+            if (!videoPlayer || videoPlayer.paused !== wasPaused) return;
+            if (wasPaused) {
+                videoPlayer.play().catch(() => {});
+            } else {
+                videoPlayer.pause();
+            }
+        }, 40);
     });
 }
 
@@ -3680,5 +3689,44 @@ function showResumeBanner(sec) {
     window.addEventListener('pagehide', () => saveCurrentWatchProgress(true));
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') saveCurrentWatchProgress(true);
+    });
+})();
+
+// =========================================================================
+// 13. PWA Service Worker & Native Install Prompt (HTTPS / Localhost)
+// =========================================================================
+(function initPwaSupport() {
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
+        });
+    }
+    const installBtn = document.getElementById('pwa-install-btn');
+    let deferredInstallPrompt = null;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredInstallPrompt = e;
+        if (installBtn) installBtn.style.display = 'inline-flex';
+    });
+
+    if (installBtn) {
+        installBtn.addEventListener('click', async () => {
+            if (!deferredInstallPrompt) return;
+            deferredInstallPrompt.prompt();
+            try {
+                const choice = await deferredInstallPrompt.userChoice;
+                if (choice && choice.outcome === 'accepted') {
+                    showToast('MyCloud Media Player 앱이 설치되었습니다.');
+                }
+            } catch (e) {}
+            deferredInstallPrompt = null;
+            installBtn.style.display = 'none';
+        });
+    }
+
+    window.addEventListener('appinstalled', () => {
+        deferredInstallPrompt = null;
+        if (installBtn) installBtn.style.display = 'none';
     });
 })();
