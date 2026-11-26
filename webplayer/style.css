@@ -2653,3 +2653,39 @@ video::cue {
 .resume-restart-btn:active {
     transform: scale(0.94);
 }
+
+/* Center Play/Pause Ripple Flash Indicator (YouTube/Netflix style) */
+.play-pause-flash {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 68px;
+    height: 68px;
+    margin-left: -34px;
+    margin-top: -34px;
+    border-radius: 50%;
+    background: rgba(13, 20, 36, 0.72);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 2147483644;
+    opacity: 0;
+    transform: scale(0.7);
+}
+
+.play-pause-flash.flash {
+    animation: centerPlayPauseFlash 0.52s cubic-bezier(0.22, 1.15, 0.36, 1) forwards;
+}
+
+@keyframes centerPlayPauseFlash {
+    0% { opacity: 0; transform: scale(0.68); }
+    24% { opacity: 0.96; transform: scale(1.02); }
+    68% { opacity: 0.85; transform: scale(1.08); }
+    100% { opacity: 0; transform: scale(1.26); }
+}

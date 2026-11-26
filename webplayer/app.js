@@ -2907,6 +2907,24 @@ if (videoPlayer) {
     videoPlayer.addEventListener('ratechange', updateMediaSessionPosition);
     videoPlayer.addEventListener('loadedmetadata', updateMediaSessionPosition);
     
+    // Center Play/Pause ripple flash indicator
+    const playPauseFlashEl = document.getElementById('play-pause-flash');
+    let playPauseFlashTimer = null;
+    function showPlayPauseFlash(isNowPaused) {
+        if (!playPauseFlashEl) return;
+        playPauseFlashEl.innerHTML = isNowPaused
+            ? '<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4.5" height="16" rx="1.2"></rect><rect x="13.5" y="4" width="4.5" height="16" rx="1.2"></rect></svg>'
+            : '<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" style="margin-left:3px;"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>';
+        playPauseFlashEl.classList.remove('flash');
+        void playPauseFlashEl.offsetWidth;
+        playPauseFlashEl.classList.add('flash');
+        if (playPauseFlashTimer) clearTimeout(playPauseFlashTimer);
+        playPauseFlashTimer = setTimeout(() => {
+            playPauseFlashEl.classList.remove('flash');
+            playPauseFlashTimer = null;
+        }, 560);
+    }
+
     // Universal double-toggle-safe click-to-play/pause on the video surface:
     // Record paused state at click time; if the browser's native <video controls>
     // already toggled it, do nothing; otherwise toggle it ourselves (covers desktop
@@ -2927,11 +2945,18 @@ if (videoPlayer) {
         if (surfaceClickToggleTimer) clearTimeout(surfaceClickToggleTimer);
         surfaceClickToggleTimer = setTimeout(() => {
             surfaceClickToggleTimer = null;
-            if (!videoPlayer || videoPlayer.paused !== wasPaused) return;
-            if (wasPaused) {
-                videoPlayer.play().catch(() => {});
+            if (!videoPlayer) return;
+            if (videoPlayer.paused === wasPaused) {
+                if (wasPaused) {
+                    videoPlayer.play().catch(() => {});
+                    showPlayPauseFlash(false);
+                } else {
+                    videoPlayer.pause();
+                    showPlayPauseFlash(true);
+                }
             } else {
-                videoPlayer.pause();
+                // Native controls toggled play/pause — still show center indicator
+                showPlayPauseFlash(videoPlayer.paused);
             }
         }, 40);
     });
