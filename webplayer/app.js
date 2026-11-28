@@ -2935,13 +2935,33 @@ if (videoPlayer) {
     videoPlayer.addEventListener('ratechange', updateMediaSessionPosition);
     videoPlayer.addEventListener('loadedmetadata', updateMediaSessionPosition);
     
-    // Universal double-toggle-safe click-to-play/pause on the video surface:
-    // Record paused state at click time; if the browser's native <video controls>
-    // already toggled it, do nothing; otherwise toggle it ourselves (covers desktop
-    // Safari, Chrome with ASS/controlsList, and mobile tap-to-pause cleanly).
+    // Distinguish ASS desktop mode vs normal video / mobile touch devices:
+    // - On mobile/touch (iOS Safari, Android Chrome), the native <video controls>
+    //   Play/Pause button sits in the CENTER of the video, so intercepting clicks
+    //   there conflicts with native playback. Never intercept on touch devices.
+    // - On non-ASS videos on desktop Chrome/Edge/Firefox, native <video controls>
+    //   already handles play/pause natively; only desktop Safari needs a sync click toggle.
+    // - On desktop when JASSUB ASS is active (controlsList="nofullscreen"), use the
+    //   double-toggle-safe check + center ripple flash.
     let surfaceClickToggleTimer = null;
     videoPlayer.addEventListener('click', (e) => {
         if (e.target !== videoPlayer) return;
+        const isTouchUi = isIOSDevice() || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+        if (isTouchUi) return;
+
+        const rect = videoPlayer.getBoundingClientRect();
+        if (rect.height > 90 && (e.clientY - rect.top) > rect.height - 54) return;
+
+        const ua = navigator.userAgent || '';
+        const isDesktopSafari = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(ua);
+        const assActive = (typeof isJassubActive !== 'undefined' && isJassubActive);
+
+        if (!assActive && !isDesktopSafari) {
+            // Normal video on desktop Chrome/Edge/Firefox: let native <video controls>
+            // handle play/pause completely untouched.
+            return;
+        }
+
         if (e.detail >= 2) {
             if (surfaceClickToggleTimer) {
                 clearTimeout(surfaceClickToggleTimer);
@@ -2949,8 +2969,20 @@ if (videoPlayer) {
             }
             return;
         }
-        const rect = videoPlayer.getBoundingClientRect();
-        if (rect.height > 90 && (e.clientY - rect.top) > rect.height - 54) return;
+
+        if (isDesktopSafari && !assActive) {
+            e.preventDefault();
+            if (videoPlayer.paused) {
+                videoPlayer.play().catch(() => {});
+                showPlayPauseFlash(false);
+            } else {
+                videoPlayer.pause();
+                showPlayPauseFlash(true);
+            }
+            return;
+        }
+
+        // Desktop ASS active mode
         const wasPaused = videoPlayer.paused;
         if (surfaceClickToggleTimer) clearTimeout(surfaceClickToggleTimer);
         surfaceClickToggleTimer = setTimeout(() => {
@@ -2965,7 +2997,6 @@ if (videoPlayer) {
                     showPlayPauseFlash(true);
                 }
             } else {
-                // Native controls toggled play/pause — still show center indicator
                 showPlayPauseFlash(videoPlayer.paused);
             }
         }, 40);
